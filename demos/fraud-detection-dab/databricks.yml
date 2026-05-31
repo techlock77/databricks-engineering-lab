@@ -1,0 +1,29 @@
+bundle:
+  name: fraud_detection_dab
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    default: workspace
+  schema:
+    default: fraud_demo
+  num_records:
+    default: 1000
+
+targets:
+  dev:
+    default: true
+    mode: development
+    variables:
+      catalog: workspace
+      schema: fraud_demo_dev
+      num_records: 1000
+
+  prod:
+    mode: production
+    variables:
+      catalog: workspace
+      schema: fraud_demo_prod
+      num_records: 100000
