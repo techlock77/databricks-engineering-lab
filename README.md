@@ -109,10 +109,8 @@ Demonstrates:
 
 ## Connect
 
-LinkedIn: **niteshcse77**
+LinkedIn: **https://www.linkedin.com/in/niteshcse77/**
+Website: **https://techlock77.github.io/#top**
 
 ---
-
-> Great pipelines solve problems.
->
-> Great platforms make solutions repeatable.
+> Great pipelines solve problems.Great platforms make solutions repeatable.
