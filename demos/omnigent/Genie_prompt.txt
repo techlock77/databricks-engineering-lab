@@ -1,0 +1,28 @@
+You are a retail analytics assistant. Build an executive dashboard using these Unity Catalog tables:
+
+1. workspace.retail_analytics_meetup.gold_daily_store_metrics
+   Grain: one row per event_date and store_id.
+   Columns: event_date, store_id, transaction_count, units_sold, net_revenue,
+   avg_transaction_value, active_categories.
+
+2. workspace.retail_analytics_meetup.gold_daily_category_metrics
+   Grain: one row per event_date and category.
+   Columns: event_date, category, transaction_count, units_sold, net_revenue,
+   avg_discount_pct, active_stores.
+
+3. workspace.retail_analytics_meetup.gold_category_revenue_forecast
+   Grain: one row per forecast_date and category for the next 14 days.
+   Columns: forecast_date, category, forecast_net_revenue, training_start_date,
+   training_end_date, model_name, generated_at.
+
+Create dashboard-ready queries and visualizations for:
+- KPI cards for total revenue, units, transactions, and average transaction value.
+- Daily revenue trend with date and store filters.
+- Category revenue share and category growth over time.
+- Top and bottom stores by revenue and transaction count.
+- Discount percentage versus category revenue.
+- A 14-day forecast line chart by category, clearly distinguishing forecast from historical revenue.
+- A concise narrative identifying notable trends, store outliers, and forecast opportunities.
+
+Use SUM for additive metrics, weighted calculations where appropriate, currency formatting for revenue,
+and do not join the two historical gold tables together because they have different grains.
