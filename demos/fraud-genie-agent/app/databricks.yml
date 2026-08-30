@@ -1,0 +1,28 @@
+# Databricks Asset Bundle for MuleGraph Investigator.
+#
+# `source_code_path` is set to the repository root ("."). This is deliberate:
+# app.yaml lives at the repo root next to it, and the app itself
+# (src/app/app.py) imports sibling packages (src.data_generator, src.pipeline,
+# src.genie) as part of the same source tree. Scoping source_code_path to a
+# subfolder -- and shipping app.yaml inside that subfolder -- was the exact
+# mistake that broke sibling-package imports in an earlier build. Keeping
+# app.yaml and source_code_path both at the root means whatever gets
+# deployed is importable exactly like the local checkout.
+bundle:
+  name: mulegraph-investigator
+
+targets:
+  demo:
+    mode: development
+    default: true
+    workspace:
+      # host: https://<your-workspace-host>.cloud.databricks.com
+      # Set the workspace host via `databricks configure` or the
+      # DATABRICKS_HOST environment variable instead of hardcoding it here.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/mulegraph-investigator/demo
+    resources:
+      apps:
+        mulegraph_investigator:
+          name: mulegraph-investigator
+          description: "MuleGraph Investigator - fraud network investigation Genie app"
+          source_code_path: .
