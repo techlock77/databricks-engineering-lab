@@ -18,15 +18,15 @@ import streamlit as st
 
 from src.genie.export import build_case_export
 from src.genie.interface import GenieContext, genie_query
+from src.data_access import load_gold_tables
 from src.pipeline import policy, views
-from src.pipeline.orchestrator import run_pipeline
 
 st.set_page_config(page_title="MuleGraph Investigator", layout="wide")
 
 
 @st.cache_resource
-def _load_pipeline():
-    return run_pipeline(seed=policy.DEFAULT_SEED)
+def _load_gold_tables():
+    return load_gold_tables()
 
 
 def _init_session_state() -> None:
@@ -138,8 +138,7 @@ def render_export_button(gold: dict, seed_account: str, evidence_policy: str) ->
 
 def main() -> None:
     _init_session_state()
-    result = _load_pipeline()
-    gold = result.gold
+    gold = _load_gold_tables()
     seed_account = gold["_seed_account"]
 
     render_freshness_banner(gold)

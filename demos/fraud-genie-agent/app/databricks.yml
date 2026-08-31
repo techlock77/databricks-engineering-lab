@@ -12,6 +12,12 @@
 bundle:
   name: mulegraph-investigator
 
+variables:
+  warehouse_id:
+    description: ID of the existing SQL warehouse used by the app and Genie Space
+  genie_space_id:
+    description: ID of the existing Genie Space over the MuleGraph Gold tables
+
 targets:
   demo:
     mode: development
@@ -27,3 +33,14 @@ targets:
           name: mulegraph-investigator
           description: "MuleGraph Investigator - fraud network investigation Genie app"
           source_code_path: .
+          resources:
+            - name: sql_warehouse
+              description: SQL warehouse used to read persisted Gold tables
+              sql_warehouse:
+                id: ${var.warehouse_id}
+                permission: CAN_USE
+            - name: genie_space
+              description: Genie Space that answers MuleGraph investigation questions
+              genie_space:
+                space_id: ${var.genie_space_id}
+                permission: CAN_RUN
