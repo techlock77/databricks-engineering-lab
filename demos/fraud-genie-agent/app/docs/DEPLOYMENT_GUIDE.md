@@ -193,6 +193,16 @@ The `demo` target deploys under
 Databricks Apps port and address. On each cold start, the app fetches the already-populated Gold
 tables through the attached SQL warehouse; it never runs the synthetic generator or pipeline.
 
+### Before a live demo: verify Genie is honoring the policy-scoped views
+
+The strict/permissive Genie steering (section 3.4) is a prompt instruction, not a code-enforced
+guarantee -- it only works if the four policy-scoped views are actually attached to the Genie
+Space as data sources. Before a live demo, do one manual smoke test: toggle the app to strict,
+ask "Ask Genie" a question whose answer would differ under permissive (e.g. a device-only-linked
+account that only shows up under permissive), and confirm via Genie's returned SQL/attachments
+that it queried `evidence_strict_v` / `network_edges_strict_v`, not the raw tables. This is a
+deployment-checklist step, not something the app can verify for you at runtime.
+
 ## 5. Known limitations
 
 - **The app requires live workspace resources.** Local and deployed runs need access to the SQL
