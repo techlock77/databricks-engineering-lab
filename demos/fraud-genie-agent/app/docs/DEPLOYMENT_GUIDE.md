@@ -1,219 +1,389 @@
-# Deployment Guide — MuleGraph Investigator on Databricks Free Edition
+# MuleGraph Investigator: manual deployment in the Databricks web UI
 
-MuleGraph Investigator is delivered inside the `databricks-engineering-lab` monorepo. It has
-two ordered pieces:
+This beginner guide goes from an empty Databricks Free Edition workspace to a live app. Everything is point-and-click in the Databricks website, apart from copying supplied file contents. Do not use a terminal, Git, a CLI, or a personal access token.
 
-1. **Unity Catalog setup and scaled synthetic-data scripts** (`scripts/`). Run these first to
-   populate persisted Delta tables for the app and Genie.
-2. **A custom Streamlit investigation app** (`src/app/app.py`). It reads those tables through a
-   SQL warehouse and sends investigator questions to the configured native Genie Space.
+Complete the stages in order. Keep the supplied `demos/fraud-genie-agent/app` folder available in your computer's file browser. A value written as `<REPLACE_ME_LIKE_THIS>` must be replaced, without angle brackets, using the instructions beside it.
 
-The deployed flow is Databricks Data → Genie → Streamlit App. The app does not generate its core
-dataset at startup.
+## Stage 1 — Log in and find the workspace UI
 
-## 1. Get the files
+### DO
 
-For a new checkout:
+1. Open the Free Edition sign-in link received at registration and sign in. If an account page lists workspaces, click the workspace to use.
+2. Record `<REPLACE_ME_WORKSPACE_HOST>` from the browser address bar: copy the URL through the Databricks domain, such as `https://dbc-12345678-abcd.cloud.databricks.com`, without the page path. This merely identifies the workspace; the app receives its host automatically.
+3. Find the left navigation. Expand it or hover over icons to see labels. This guide uses **SQL Editor**, **SQL Warehouses**, **Workspace**, **Catalog**, **Genie**, and **Databricks Apps**. If hidden, use the app switcher; data tools are under **Analytics and AI** and apps under **Databricks Apps**.
 
-```bash
-git clone https://github.com/techlock77/databricks-engineering-lab.git
-cd databricks-engineering-lab/demos/fraud-genie-agent/app
+### RUN
+
+Click **Workspace** and wait for its file browser to open.
+
+### VALIDATE
+
+Confirm the URL starts with `<REPLACE_ME_WORKSPACE_HOST>`, your profile appears at top-right, and both **Workspace** and **SQL Editor** are reachable.
+
+**PASS:** You are in the intended workspace and can open those two pages. Go to Stage 2.
+
+#### Troubleshooting
+
+- Account console shown: click the Free Edition workspace tile.
+- Item missing: expand the sidebar or use the app switcher.
+- Multiple workspaces: compare the address bar with `<REPLACE_ME_WORKSPACE_HOST>`; all later resources must be in one workspace.
+
+## Stage 2 — Create the catalog, schema, eight tables, and four views
+
+### DO
+
+1. Click **SQL Editor** > **New query**.
+2. Use the top **Compute** selector to choose a SQL warehouse. If none exists, click **SQL Warehouses** > **Create SQL warehouse**, accept the Free Edition defaults, and click **Create**.
+3. Paste the complete, verbatim contents of `scripts/sql/01_setup_catalog_and_schema.sql` below into the query editor:
+
+```sql
+-- ============================================================================
+-- MuleGraph Investigator: Catalog, Schema, and Gold Tables Setup
+-- ============================================================================
+--
+-- BEFORE RUNNING: Edit the catalog and schema names below to match your
+-- workspace conventions. The defaults are:
+--   - Catalog: mulegraph
+--   - Schema:  investigations
+--
+-- This script is designed to be run in a Databricks SQL editor or a notebook
+-- %sql cell. It creates all 8 Gold tables as Delta tables if they don't exist.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Create catalog and schema (edit these names as needed)
+-- ---------------------------------------------------------------------------
+
+CREATE CATALOG IF NOT EXISTS mulegraph;
+CREATE SCHEMA IF NOT EXISTS mulegraph.investigations;
+
+USE CATALOG mulegraph;
+USE SCHEMA investigations;
+
+-- ---------------------------------------------------------------------------
+-- 2. Gold tables (8 tables, matching src/pipeline/gold.py output exactly)
+-- ---------------------------------------------------------------------------
+
+-- accounts: All accounts with detection results and case-level headline numbers
+CREATE TABLE IF NOT EXISTS accounts (
+    account_id STRING,
+    cohort STRING,
+    account_role STRING,
+    open_date DATE,
+    display_name STRING,
+    tenure_days BIGINT,
+    distinct_source_count BIGINT,
+    total_inbound_amount DOUBLE,
+    distinct_destination_count BIGINT,
+    distinct_outbound_months BIGINT,
+    total_outbound_amount DOUBLE,
+    raw_fan_pattern_flag BOOLEAN,
+    override_applied BOOLEAN,
+    is_flagged_mule_network BOOLEAN,
+    detection_reason STRING,
+    risk_band STRING,
+    case_total_exposure_permissive DOUBLE,
+    case_total_exposure_strict DOUBLE,
+    case_other_connected_accounts_permissive BIGINT,
+    case_other_connected_accounts_strict BIGINT
+) USING DELTA;
+
+-- evidence: Device linkage and account-takeover evidence with confidence scores
+CREATE TABLE IF NOT EXISTS evidence (
+    evidence_id STRING,
+    account_id STRING,
+    related_account_id STRING,
+    device_id STRING,
+    evidence_type STRING,
+    confidence STRING,
+    rail STRING,
+    cohort STRING,
+    fund_flow_amount DOUBLE,
+    description STRING
+) USING DELTA;
+
+-- network_edges: All edges in the network graph (device-sharing and fund-flow)
+CREATE TABLE IF NOT EXISTS network_edges (
+    edge_id STRING,
+    account_a STRING,
+    account_b STRING,
+    edge_type STRING,
+    device_id STRING,
+    amount DOUBLE,
+    strict_included BOOLEAN,
+    permissive_included BOOLEAN
+) USING DELTA;
+
+-- transfers: Individual transactions with cohort annotations
+CREATE TABLE IF NOT EXISTS transfers (
+    txn_id STRING,
+    source_account STRING,
+    dest_account STRING,
+    amount DOUBLE,
+    txn_date DATE,
+    channel STRING,
+    month STRING,
+    source_cohort STRING,
+    dest_cohort STRING
+) USING DELTA;
+
+-- case_summary: Per-case headline metrics for both evidence policies
+CREATE TABLE IF NOT EXISTS case_summary (
+    case_id STRING,
+    seed_account STRING,
+    total_exposure_permissive DOUBLE,
+    total_exposure_strict DOUBLE,
+    other_connected_accounts_permissive BIGINT,
+    other_connected_accounts_strict BIGINT,
+    shared_devices_permissive BIGINT,
+    shared_devices_strict BIGINT,
+    potential_victims_count BIGINT,
+    destinations_count BIGINT
+) USING DELTA;
+
+-- control_cohort: Legitimate high-volume accounts protected by tenure/recurrence override
+CREATE TABLE IF NOT EXISTS control_cohort (
+    account_id STRING,
+    cohort STRING,
+    account_role STRING,
+    tenure_days BIGINT,
+    distinct_outbound_months BIGINT,
+    distinct_source_count BIGINT,
+    distinct_destination_count BIGINT,
+    total_outbound_amount DOUBLE,
+    raw_fan_pattern_flag BOOLEAN,
+    override_applied BOOLEAN,
+    is_flagged_mule_network BOOLEAN,
+    detection_reason STRING
+) USING DELTA;
+
+-- freshness: Data freshness tracking for all Gold tables
+CREATE TABLE IF NOT EXISTS freshness (
+    table_name STRING,
+    last_refreshed_ts STRING,
+    freshness_contract_hours BIGINT,
+    is_stale BOOLEAN
+) USING DELTA;
+
+-- export_citations: Pre-computed citation text for case file exports
+CREATE TABLE IF NOT EXISTS export_citations (
+    citation_id STRING,
+    source_table STRING,
+    source_row_id STRING,
+    account_id STRING,
+    citation_text STRING
+) USING DELTA;
+
+-- ---------------------------------------------------------------------------
+-- 3. Policy-scoped views for Genie
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE VIEW evidence_strict_v AS
+SELECT *
+FROM evidence
+WHERE evidence_type IN ('device_and_fund_flow', 'account_takeover_provenance');
+
+CREATE OR REPLACE VIEW evidence_permissive_v AS
+SELECT *
+FROM evidence;
+
+CREATE OR REPLACE VIEW network_edges_strict_v AS
+SELECT *
+FROM network_edges
+WHERE strict_included = TRUE;
+
+CREATE OR REPLACE VIEW network_edges_permissive_v AS
+SELECT *
+FROM network_edges
+WHERE permissive_included = TRUE;
 ```
 
-If the monorepo is already cloned, update it using your normal Git workflow, then run:
+### RUN
 
-```bash
-cd demos/fraud-genie-agent/app
+Click **Run all** and wait for every statement to succeed.
+
+### VALIDATE
+
+Click **Catalog**, expand `mulegraph` > `investigations`, and verify these tables: `accounts`, `evidence`, `network_edges`, `transfers`, `case_summary`, `control_cohort`, `freshness`, `export_citations`. Verify these views: `evidence_strict_v`, `evidence_permissive_v`, `network_edges_strict_v`, `network_edges_permissive_v`.
+
+In a new SQL query, run this guide-only validation query:
+
+```sql
+SELECT 'accounts' AS object_name, COUNT(*) AS row_count FROM mulegraph.investigations.accounts
+UNION ALL SELECT 'evidence', COUNT(*) FROM mulegraph.investigations.evidence
+UNION ALL SELECT 'network_edges', COUNT(*) FROM mulegraph.investigations.network_edges
+UNION ALL SELECT 'transfers', COUNT(*) FROM mulegraph.investigations.transfers
+UNION ALL SELECT 'case_summary', COUNT(*) FROM mulegraph.investigations.case_summary
+UNION ALL SELECT 'control_cohort', COUNT(*) FROM mulegraph.investigations.control_cohort
+UNION ALL SELECT 'freshness', COUNT(*) FROM mulegraph.investigations.freshness
+UNION ALL SELECT 'export_citations', COUNT(*) FROM mulegraph.investigations.export_citations;
 ```
 
-**Every shell command below assumes the current directory is
-`demos/fraud-genie-agent/app`.**
+**PASS:** Catalog shows 8 tables and 4 views; the query returns 8 rows, each with count `0`. Go to Stage 3.
 
-The delivered app directory is exactly:
+#### Troubleshooting
+
+- `PERMISSION_DENIED` on catalog creation: use the Free Edition workspace you own or obtain `CREATE CATALOG`; changing names also requires changing `app.yaml`.
+- No compute selected: choose a warehouse in the editor and rerun.
+- Views missing: rerun the last four `CREATE OR REPLACE VIEW` statements after the two `USE` statements.
+
+## Stage 3 — Upload source and load synthetic data as a notebook
+
+The notebook imports `src`, so upload the app tree now; Stage 5 deploys this same folder.
+
+### DO
+
+1. Click **Workspace** > **Users** > your email folder. Click **Create** > **Folder**, name it `mulegraph-investigator`, and open it.
+2. Record `<REPLACE_ME_APP_SOURCE_PATH>` from the breadcrumb. It means this workspace folder and normally resembles `/Workspace/Users/<REPLACE_ME_YOUR_EMAIL>/mulegraph-investigator`; find `<REPLACE_ME_YOUR_EMAIL>` in the top-right profile menu.
+3. In this folder choose the three-dot menu > **Import**, or drag files into it. Upload the contents of the supplied `app` directory while preserving folders. If necessary, create subfolders with **Create** > **Folder** and import their files separately.
+4. Confirm the folder directly contains `app.yaml`, `requirements.txt`, `.streamlit/config.toml`, complete `src` (including every `__init__.py`, `data_generator`, `genie`, and `pipeline`), and `scripts`.
+5. Open `<REPLACE_ME_APP_SOURCE_PATH>/scripts/generate_synthetic_data.py`. Because its first line is `# Databricks notebook source`, Databricks imports it as a multi-cell notebook. If it is absent/plain, use the `scripts` folder menu > **Import**, select that `.py`, and click **Import**.
+6. Choose available serverless compute if prompted. Run the first Python cell once so its widgets appear. That exact cell is:
+
+```python
+dbutils.widgets.text("catalog", "mulegraph", "Catalog name")
+dbutils.widgets.text("schema", "investigations", "Schema name")
+dbutils.widgets.text("scale_factor", "3", "Number of independent cases to generate")
+dbutils.widgets.text("seed", "42", "Random seed for reproducibility")
+dbutils.widgets.text(
+    "repo_path",
+    "/Workspace/Repos/<your-username>/mulegraph-implementation",
+    "Path to repo root (e.g. /Workspace/Repos/user@example.com/mulegraph-implementation)"
+)
+```
+
+7. Do not edit the cell. In the top widget bar enter: Catalog `mulegraph`; Schema `investigations`; scale `3`; seed `42`; repo path `<REPLACE_ME_APP_SOURCE_PATH>`. “Repo path” is a historical label: it means the uploaded folder directly containing `src`, not Git.
+
+### RUN
+
+Click **Run all** and wait for `Data generation complete. Genie can now query these tables.` The notebook overwrites all eight tables on every run.
+
+### VALIDATE
+
+The final output must show: `accounts` 117, `evidence` 36, `network_edges` 172, `transfers` 390, `case_summary` 3, `control_cohort` 27, `freshness` 8, `export_citations` 39. Rerun Stage 2's count query for an independent check.
+
+**PASS:** The notebook succeeds and all eight counts match. Go to Stage 4.
+
+#### Troubleshooting
+
+- Cannot find `src`: copy the Workspace path of the folder directly containing `src` into the widget; remove an accidental extra `app` level.
+- Placeholder `<your-username>` error: replace the widget value with `<REPLACE_ME_APP_SOURCE_PATH>`; do not edit source.
+- Write denied/missing table: verify catalog/schema widgets and that Stage 2 passed on Unity Catalog-capable compute.
+
+## Stage 4 — Create and test a Genie Space
+
+### DO
+
+1. Click **Genie** > **New**. In **Connect your data**, browse to `mulegraph.investigations`.
+2. Select all 8 tables and all 4 views listed in Stage 2, then click **Create**. Name it `MuleGraph Investigator` if prompted.
+3. In **Configure** / the data panel, confirm all 12 sources. Policy questions must use the scoped views instead of raw `evidence` or `network_edges`; the app also adds this instruction to each prompt.
+4. Record `<REPLACE_ME_GENIE_SPACE_ID>` from the open space URL: copy the value after `/genie/rooms/` (or the final long URL identifier), not its display name.
+
+### RUN
+
+Ask: “How many cases are in case_summary, and what is the total permissive exposure across them?” Send it and inspect **Show SQL** or its query attachment.
+
+### VALIDATE
+
+It must query `mulegraph.investigations.case_summary`, report 3 cases, and calculate a total. Then ask: “Under the strict evidence policy, count rows using evidence_strict_v. Do not use the raw evidence table.” Confirm its SQL uses `evidence_strict_v`.
+
+**PASS:** The space lists 12 sources and live Genie answers both questions using the expected objects. Go to Stage 5.
+
+#### Troubleshooting
+
+- Missing source: use **Configure data** to attach it and save.
+- Empty answer: confirm `case_summary` has 3 rows in SQL Editor.
+- Raw policy table used: confirm all views are attached, repeat the explicit view instruction, and save a successful question/SQL example before continuing.
+
+## Stage 5 — Create and deploy the Databricks App
+
+### DO
+
+1. Click **SQL Warehouses**, open the warehouse used above, then **Connection details**. Record `<REPLACE_ME_SQL_WAREHOUSE_ID>` from the details/page URL and `<REPLACE_ME_SQL_WAREHOUSE_HTTP_PATH>` from **HTTP path**. The code needs only the ID; recording the HTTP path helps verify that the same warehouse was selected.
+2. Open the app switcher > **Databricks Apps** (some layouts show **Compute** > **Apps**). Click **Create app** > **Create a custom app**. Name it `mulegraph-investigator`, or use `<REPLACE_ME_UNIQUE_APP_NAME>` for a unique lowercase/hyphenated name.
+3. In **App resources**, click **+ Add resource** > **SQL warehouse**. Select the warehouse matching the recorded ID/path, permission **Can use**, and set its custom resource key to exactly `sql_warehouse` (underscore).
+4. Add **Genie Agent** (sometimes **Genie Space**). Select the space matching `<REPLACE_ME_GENIE_SPACE_ID>`, permission **Can run**, and key exactly `genie_space`.
+5. Add each of the 8 tables and 4 views from Stage 2 as **Unity Catalog table** resources with **Select**. Their generated keys are unused and may remain unchanged. This grants the app identity `USE CATALOG`, `USE SCHEMA`, and `SELECT`. If views are unavailable as resources, open each view under **Catalog** > **Permissions** > **Grant**, choose the service principal shown on the app's **Authorization** tab, and grant **SELECT**.
+
+The complete checked-in `app.yaml` is reproduced verbatim:
+
+```yaml
+# Databricks Apps manifest.
+#
+# This file lives at the app's own bundle root (the directory containing
+# databricks.yml, not the monorepo root), alongside the full source tree
+# (src/, requirements.txt). databricks.yml's source_code_path is
+# also that bundle root, so the deployed app always has every sibling
+# package the entrypoint imports available next to it -- see the note in
+# databricks.yml for why that pairing matters.
+command: ["streamlit", "run", "src/app/app.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql_warehouse
+  - name: DATABRICKS_GENIE_SPACE_ID
+    valueFrom: genie_space
+  - name: DATABRICKS_CATALOG
+    value: mulegraph
+  - name: DATABRICKS_SCHEMA
+    value: investigations
+```
+
+`DATABRICKS_WAREHOUSE_ID` is required by `src/data_access.py`; `DATABRICKS_GENIE_SPACE_ID` by `src/genie/interface.py`; catalog/schema are read by `data_access.py`. There is no HTTP-path or token variable. Both modules create `WorkspaceClient()`, which uses the Databricks App's automatically injected host and OAuth credentials. Never paste a token.
+
+6. In **Workspace**, open `<REPLACE_ME_APP_SOURCE_PATH>`. Confirm `app.yaml` matches above and sits beside `requirements.txt` and `src`. The complete `requirements.txt` is:
 
 ```text
-app/
-├── .streamlit/
-│   └── config.toml
-├── docs/
-│   ├── CONTEST_DEMO_SCRIPT.md
-│   └── DEPLOYMENT_GUIDE.md
-├── scripts/
-│   ├── generate_synthetic_data.py
-│   └── sql/
-│       └── 01_setup_catalog_and_schema.sql
-├── src/
-│   ├── __init__.py
-│   ├── app/
-│   │   ├── __init__.py
-│   │   └── app.py
-│   ├── data_generator/
-│   │   ├── __init__.py
-│   │   └── generator.py
-│   ├── genie/
-│   │   ├── __init__.py
-│   │   ├── export.py
-│   │   ├── interface.py
-│   │   └── responder.py
-│   └── pipeline/
-│       ├── __init__.py
-│       ├── detection.py
-│       ├── gold.py
-│       ├── network.py
-│       ├── orchestrator.py
-│       ├── policy.py
-│       ├── silver.py
-│       └── views.py
-├── app.yaml
-├── databricks.yml
-└── requirements.txt
+pandas>=2.0,<3.0
+streamlit>=1.32,<2.0
+databricks-sdk>=0.66,<1.0
 ```
 
-## 2. Run locally against Databricks
+Import any missing files through the folder menu. `app.yaml`, `requirements.txt`, `.streamlit`, and complete `src` are essential.
 
-Local execution requires Databricks authentication plus an existing SQL warehouse, populated
-Gold tables, and Genie Space. Configure:
+### RUN
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-export DATABRICKS_WAREHOUSE_ID=<warehouse-id>
-export DATABRICKS_GENIE_SPACE_ID=<genie-space-id>
-# Optional when using the defaults shown below:
-export DATABRICKS_CATALOG=mulegraph
-export DATABRICKS_SCHEMA=investigations
-streamlit run src/app/app.py
-```
+Open the app, click **Deploy**, choose **Workspace folder** / **From workspace**, select `<REPLACE_ME_APP_SOURCE_PATH>`, then **Select** > **Deploy**. Wait for **Running** / **Active**, then click **Open app**.
 
-Open `http://localhost:8501`. Stop the server with Ctrl+C.
+### VALIDATE
 
-## 3. Unity Catalog setup and scaled synthetic data for a Genie Space
+The app must be Running, open without a red exception, and show populated case cards/tabs. **Logs** must not contain missing-variable, `PERMISSION_DENIED`, `ModuleNotFoundError`, or empty `case_summary` errors.
 
-These scripts are Databricks-native and require a live Databricks workspace. They populate the
-persisted data that both the Streamlit app and Genie require.
+**PASS:** The Running app renders persisted investigation data. Go to Stage 6.
 
-### 3.1 Put the monorepo in your workspace
+#### Troubleshooting
 
-Connect the `databricks-engineering-lab` repository using Databricks Git folders (formerly
-Repos), or upload the repository through the workspace file browser. Note the app directory's
-workspace path. A typical Git-folder path is:
+- Missing variable: keys must be exactly `sql_warehouse` and `genie_space`; `app.yaml` must be at the deployed folder root. Fix and redeploy.
+- Permission/auth error: confirm **Can use**, **Can run**, and **Select** on all 12 objects for the app identity; redeploy.
+- Import/dependency error: deploy the folder directly containing `app.yaml`, `requirements.txt`, and complete `src`.
+
+## Stage 6 — End-to-end live Genie validation
+
+### DO
+
+Open the Running app's **Ask Genie** panel, leave policy on **Strict**, and enter: “For the current seed account, summarize connected accounts and total exposure under the strict policy. Cite the Databricks sources used.”
+
+### RUN
+
+Click its ask/send button and wait for the result.
+
+### VALIDATE
+
+The answer must reference the displayed seed account; contain persisted findings; show at least one `Databricks Genie` citation/query attachment; show a freshness note derived from `freshness`; and use `evidence_strict_v` and/or `network_edges_strict_v` rather than raw policy-mixing tables. Switch to **Permissive**, repeat, and confirm the permissive views are used.
+
+The deployed code has no silent mock/canned fallback. A real answer with Genie attachments proves this path:
 
 ```text
-/Workspace/Repos/<you>/databricks-engineering-lab/demos/fraud-genie-agent/app
+Delta tables/views → SQL warehouse + Genie Space → Databricks App → cited Ask Genie answer
 ```
 
-The exact prefix may differ with your workspace's Git-folder layout. What matters is that the
-chosen directory directly contains `src/`, `scripts/`, `app.yaml`, and `databricks.yml`.
+**FINAL PASS:** The app shows persisted case data and Ask Genie returns a real, cited, Databricks-backed answer using the selected policy views. Deployment is complete.
 
-### 3.2 Create the catalog, schema, and Gold tables
+#### Troubleshooting
 
-Open `scripts/sql/01_setup_catalog_and_schema.sql` in a Databricks SQL editor, or paste it into
-a notebook `%sql` cell. Run it as-is, or change the catalog and schema names at the top first.
-The defaults are `mulegraph` and `investigations`.
+- App data works but Genie errors: verify `genie_space`, **Can run**, and the selected space ID; redeploy.
+- No query/citation: ask Stage 4's concrete aggregation question and first confirm it produces SQL directly in Genie.
+- Raw tables used: stop; attach all four views and repeat Stage 4's policy smoke test until its SQL uses scoped views.
 
-The SQL creates these eight Gold-layer Delta tables: `accounts`, `evidence`, `network_edges`,
-`transfers`, `case_summary`, `control_cohort`, `freshness`, and `export_citations`.
+## Deliberately not required
 
-### 3.3 Generate and load the scaled dataset
-
-Open `scripts/generate_synthetic_data.py` as a Databricks notebook. Its Databricks notebook
-header allows the workspace importer to render it as a notebook. Configure the widgets:
-
-| Widget | Default in the notebook | Value to use |
-|---|---|---|
-| `catalog` | `mulegraph` | The catalog created in 3.2 |
-| `schema` | `investigations` | The schema created in 3.2 |
-| `scale_factor` | `3` | Number of independent mule-network and control-cohort cases |
-| `seed` | `42` | Keep for reproducibility, or change for different synthetic data |
-| `repo_path` | Old standalone-repo placeholder | The **app directory** from 3.1, for example `/Workspace/Repos/<you>/databricks-engineering-lab/demos/fraud-genie-agent/app` |
-
-The checked-in notebook retains an old placeholder string in the `repo_path` widget. Replace it
-before running if the first import attempt does not already succeed. The notebook specifically
-expects `repo_path` to be a directory containing `src/pipeline/orchestrator.py`; therefore the
-nested app path above—not the monorepo root—is the correct value. If the app directory is already
-on Python's import path, the notebook imports directly and does not use the fallback widget.
-
-Run all cells. The final cell prints a row count for every Gold table, confirming the load.
-
-### 3.4 Create a native Genie Space
-
-1. In the Databricks workspace, open **Genie** and choose **New Genie Space**.
-2. Select the catalog and schema from 3.2 (`mulegraph.investigations` by default).
-3. Add all eight Gold tables plus the four policy-scoped views (`evidence_strict_v`,
-   `evidence_permissive_v`, `network_edges_strict_v`, and `network_edges_permissive_v`) as data
-   sources. Genie uses these views for policy-scoped evidence and network questions.
-4. Optionally reuse the table and column comments in
-   `scripts/sql/01_setup_catalog_and_schema.sql` as Genie instructions/context.
-5. Copy the Genie Space ID from its workspace URL or settings. You will supply it at deployment.
-
-With `scale_factor=3` or higher, the native Genie Space can query multiple distinct cases, a
-control cohort, and a broad baseline pool.
-
-## 4. Deploy the Streamlit app with Databricks Asset Bundles
-
-Install the Databricks CLI if needed, then authenticate to the intended workspace. From
-`demos/fraud-genie-agent/app`, supply the IDs of the existing warehouse and the Genie Space from
-3.4, then run:
-
-```bash
-databricks auth login --host https://<your-workspace-host>.cloud.databricks.com
-databricks bundle validate -t demo \
-  --var warehouse_id=<warehouse-id> \
-  --var genie_space_id=<genie-space-id>
-databricks bundle deploy -t demo \
-  --var warehouse_id=<warehouse-id> \
-  --var genie_space_id=<genie-space-id>
-databricks bundle run -t demo mulegraph_investigator
-```
-
-The names above match `databricks.yml`: the sole target is `demo`, and the app resource key is
-`mulegraph_investigator`. The deployed app name is `mulegraph-investigator`.
-
-The commented `workspace.host` entry is intentional. Authentication may supply the host, or you
-may configure it using the CLI or `DATABRICKS_HOST` rather than committing a workspace URL.
-The bundle attaches both existing resources to the app with least-privilege access. `app.yaml`
-maps the `sql_warehouse` and `genie_space` resource keys to `DATABRICKS_WAREHOUSE_ID` and
-`DATABRICKS_GENIE_SPACE_ID`; the App service principal authenticates `WorkspaceClient()`
-automatically. Ensure that principal also has `USE CATALOG`, `USE SCHEMA`, and `SELECT` on the
-eight Gold tables. For non-bundle deployments, attach both resources in the Apps UI or set the
-two environment variables explicitly.
-
-### Why `source_code_path: .` is correct in this monorepo
-
-The Databricks CLI treats the directory containing `databricks.yml` as the bundle root. Here that
-directory is `demos/fraud-genie-agent/app`, even though it is nested inside a larger monorepo.
-Consequently, the resource's `source_code_path: .` resolves to the app directory, not to the
-monorepo root. Running the bundle commands from inside the app directory makes this relationship
-explicit and ensures `app.yaml`, `requirements.txt`, and the complete `src/` package are deployed
-together.
-
-The `demo` target deploys under
-`/Workspace/Users/<you>/.bundle/mulegraph-investigator/demo`. `app.yaml` starts Streamlit on the
-Databricks Apps port and address. On each cold start, the app fetches the already-populated Gold
-tables through the attached SQL warehouse; it never runs the synthetic generator or pipeline.
-
-### Before a live demo: verify Genie is honoring the policy-scoped views
-
-The strict/permissive Genie steering (section 3.4) is a prompt instruction, not a code-enforced
-guarantee -- it only works if the four policy-scoped views are actually attached to the Genie
-Space as data sources. Before a live demo, do one manual smoke test: toggle the app to strict,
-ask "Ask Genie" a question whose answer would differ under permissive (e.g. a device-only-linked
-account that only shows up under permissive), and confirm via Genie's returned SQL/attachments
-that it queried `evidence_strict_v` / `network_edges_strict_v`, not the raw tables. This is a
-deployment-checklist step, not something the app can verify for you at runtime.
-
-## 5. Known limitations
-
-- **The app requires live workspace resources.** Local and deployed runs need access to the SQL
-  warehouse, the eight persisted tables, and the configured Genie Space; there is no silent local
-  data or rule-responder fallback.
-- **The current UI opens the first case in `case_summary`.** `scale_factor` controls how many cases
-  the offline notebook persists and Genie can query, while the fixed investigation layout selects
-  the first persisted seed account for its cards and tabs.
-- **The generated Unity Catalog data is synthetic and overwritten on each notebook run.** The
-  notebook writes every Gold table in `overwrite` mode; it is a demo loader, not an incremental
-  production pipeline.
-- **Workspace steps still require user configuration.** Catalog/schema permissions, a usable SQL
-  compute context, Databricks authentication, and native Genie Space creation depend on the target
-  workspace and are not performed by the local app.
+No CLI, bundle deployment, Git, terminal, local Streamlit server, personal token, client secret, or manually created service principal is needed. The supplied `databricks.yml` is automation metadata and is not used by this UI-only path. Re-running the notebook overwrites the synthetic tables; with scale 3, Genie sees three cases while the fixed app layout opens the first persisted case.
