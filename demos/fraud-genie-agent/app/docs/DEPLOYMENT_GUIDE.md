@@ -1,15 +1,15 @@
 # Deployment Guide — MuleGraph Investigator on Databricks Free Edition
 
 MuleGraph Investigator is delivered inside the `databricks-engineering-lab` monorepo. It has
-two independent pieces:
+two ordered pieces:
 
-1. **A custom Streamlit investigation app** (`src/app/app.py`) with a deterministic, in-memory
-   demo case (seed 42). Deploy this as a Databricks App for the investigator UI.
-2. **Unity Catalog setup and scaled synthetic-data scripts** (`scripts/`). Run these in a
-   Databricks workspace to populate Delta tables for a native Genie Space with multiple cases.
+1. **Unity Catalog setup and scaled synthetic-data scripts** (`scripts/`). Run these first to
+   populate persisted Delta tables for the app and Genie.
+2. **A custom Streamlit investigation app** (`src/app/app.py`). It reads those tables through a
+   SQL warehouse and sends investigator questions to the configured native Genie Space.
 
-You can use either piece independently, or both. The Streamlit app does not read the Unity
-Catalog tables; see [Known limitations](#5-known-limitations).
+The deployed flow is Databricks Data → Genie → Streamlit App. The app does not generate its core
+dataset at startup.
 
 ## 1. Get the files
 
@@ -69,15 +69,20 @@ app/
 └── requirements.txt
 ```
 
-## 2. Run locally
+## 2. Run locally against Databricks
 
-The app needs no environment variables, workspace connection, or network access at runtime.
-It generates its demo data locally in memory.
+Local execution requires Databricks authentication plus an existing SQL warehouse, populated
+Gold tables, and Genie Space. Configure:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+export DATABRICKS_WAREHOUSE_ID=<warehouse-id>
+export DATABRICKS_GENIE_SPACE_ID=<genie-space-id>
+# Optional when using the defaults shown below:
+export DATABRICKS_CATALOG=mulegraph
+export DATABRICKS_SCHEMA=investigations
 streamlit run src/app/app.py
 ```
 
@@ -85,8 +90,8 @@ Open `http://localhost:8501`. Stop the server with Ctrl+C.
 
 ## 3. Unity Catalog setup and scaled synthetic data for a Genie Space
 
-These scripts are Databricks-native and require a live Databricks workspace. They are separate
-from the self-contained Streamlit app.
+These scripts are Databricks-native and require a live Databricks workspace. They populate the
+persisted data that both the Streamlit app and Genie require.
 
 ### 3.1 Put the monorepo in your workspace
 
@@ -135,9 +140,12 @@ Run all cells. The final cell prints a row count for every Gold table, confirmin
 
 1. In the Databricks workspace, open **Genie** and choose **New Genie Space**.
 2. Select the catalog and schema from 3.2 (`mulegraph.investigations` by default).
-3. Add all eight Gold tables as data sources.
+3. Add all eight Gold tables plus the four policy-scoped views (`evidence_strict_v`,
+   `evidence_permissive_v`, `network_edges_strict_v`, and `network_edges_permissive_v`) as data
+   sources. Genie uses these views for policy-scoped evidence and network questions.
 4. Optionally reuse the table and column comments in
    `scripts/sql/01_setup_catalog_and_schema.sql` as Genie instructions/context.
+5. Copy the Genie Space ID from its workspace URL or settings. You will supply it at deployment.
 
 With `scale_factor=3` or higher, the native Genie Space can query multiple distinct cases, a
 control cohort, and a broad baseline pool.
@@ -145,12 +153,17 @@ control cohort, and a broad baseline pool.
 ## 4. Deploy the Streamlit app with Databricks Asset Bundles
 
 Install the Databricks CLI if needed, then authenticate to the intended workspace. From
-`demos/fraud-genie-agent/app`, run:
+`demos/fraud-genie-agent/app`, supply the IDs of the existing warehouse and the Genie Space from
+3.4, then run:
 
 ```bash
 databricks auth login --host https://<your-workspace-host>.cloud.databricks.com
-databricks bundle validate -t demo
-databricks bundle deploy -t demo
+databricks bundle validate -t demo \
+  --var warehouse_id=<warehouse-id> \
+  --var genie_space_id=<genie-space-id>
+databricks bundle deploy -t demo \
+  --var warehouse_id=<warehouse-id> \
+  --var genie_space_id=<genie-space-id>
 databricks bundle run -t demo mulegraph_investigator
 ```
 
@@ -159,6 +172,12 @@ The names above match `databricks.yml`: the sole target is `demo`, and the app r
 
 The commented `workspace.host` entry is intentional. Authentication may supply the host, or you
 may configure it using the CLI or `DATABRICKS_HOST` rather than committing a workspace URL.
+The bundle attaches both existing resources to the app with least-privilege access. `app.yaml`
+maps the `sql_warehouse` and `genie_space` resource keys to `DATABRICKS_WAREHOUSE_ID` and
+`DATABRICKS_GENIE_SPACE_ID`; the App service principal authenticates `WorkspaceClient()`
+automatically. Ensure that principal also has `USE CATALOG`, `USE SCHEMA`, and `SELECT` on the
+eight Gold tables. For non-bundle deployments, attach both resources in the Apps UI or set the
+two environment variables explicitly.
 
 ### Why `source_code_path: .` is correct in this monorepo
 
@@ -171,18 +190,27 @@ together.
 
 The `demo` target deploys under
 `/Workspace/Users/<you>/.bundle/mulegraph-investigator/demo`. `app.yaml` starts Streamlit on the
-Databricks Apps port and address. On each cold start, the app regenerates its seed-42 dataset in
-memory.
+Databricks Apps port and address. On each cold start, the app fetches the already-populated Gold
+tables through the attached SQL warehouse; it never runs the synthetic generator or pipeline.
+
+### Before a live demo: verify Genie is honoring the policy-scoped views
+
+The strict/permissive Genie steering (section 3.4) is a prompt instruction, not a code-enforced
+guarantee -- it only works if the four policy-scoped views are actually attached to the Genie
+Space as data sources. Before a live demo, do one manual smoke test: toggle the app to strict,
+ask "Ask Genie" a question whose answer would differ under permissive (e.g. a device-only-linked
+account that only shows up under permissive), and confirm via Genie's returned SQL/attachments
+that it queried `evidence_strict_v` / `network_edges_strict_v`, not the raw tables. This is a
+deployment-checklist step, not something the app can verify for you at runtime.
 
 ## 5. Known limitations
 
-- **The Streamlit app and Unity Catalog use separate data paths.** The app recomputes one demo
-  case in memory and does not read the scaled tables populated by the notebook.
-- **The in-app “Ask Genie” panel is not connected to a native Genie Space.** It is a deterministic,
-  rule-based responder over in-memory Gold tables and recognizes approximately nine investigation
-  question patterns. `src/genie/interface.py` provides a seam for a future live integration.
-- **`scale_factor` affects only the data-loading notebook.** The deployed app always runs its
-  single polished case, equivalent to `scale_factor=1`.
+- **The app requires live workspace resources.** Local and deployed runs need access to the SQL
+  warehouse, the eight persisted tables, and the configured Genie Space; there is no silent local
+  data or rule-responder fallback.
+- **The current UI opens the first case in `case_summary`.** `scale_factor` controls how many cases
+  the offline notebook persists and Genie can query, while the fixed investigation layout selects
+  the first persisted seed account for its cards and tabs.
 - **The generated Unity Catalog data is synthetic and overwritten on each notebook run.** The
   notebook writes every Gold table in `overwrite` mode; it is a demo loader, not an incremental
   production pipeline.

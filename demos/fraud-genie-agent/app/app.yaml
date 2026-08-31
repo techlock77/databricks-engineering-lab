@@ -7,3 +7,12 @@
 # package the entrypoint imports available next to it -- see the note in
 # databricks.yml for why that pairing matters.
 command: ["streamlit", "run", "src/app/app.py", "--server.port", "8000", "--server.address", "0.0.0.0"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql_warehouse
+  - name: DATABRICKS_GENIE_SPACE_ID
+    valueFrom: genie_space
+  - name: DATABRICKS_CATALOG
+    value: mulegraph
+  - name: DATABRICKS_SCHEMA
+    value: investigations

@@ -1,6 +1,7 @@
-"""Rule-based responder over the Gold tables.
+"""Explicit local test fallback over the Gold tables.
 
-Answers a fixed set of ~9 investigation questions. Every number in every
+This module is never selected by the deployed app. Tests may inject
+``answer_question`` into ``genie_query`` explicitly. Every number in every
 answer is read from a Gold table or from network.build_case_network's
 output for the context's evidence policy -- nothing is invented.
 """
