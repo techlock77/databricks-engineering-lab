@@ -41,7 +41,16 @@ def test_load_gold_tables_queries_all_persisted_tables(monkeypatch):
     calls = []
     columns_by_table = {
         "case_summary": [_column("seed_account", "STRING")],
-        "network_edges": [_column("edge_id", "STRING"), _column("account_a", "STRING")],
+        "network_edges": [
+            _column("edge_id", "STRING"),
+            _column("account_a", "STRING"),
+            _column("account_b", "STRING"),
+            _column("edge_type", "STRING"),
+            _column("device_id", "STRING"),
+            _column("amount", "DOUBLE"),
+            _column("strict_included", "BOOLEAN"),
+            _column("permissive_included", "BOOLEAN"),
+        ],
     }
 
     class StatementApi:
@@ -52,7 +61,7 @@ def test_load_gold_tables_queries_all_persisted_tables(monkeypatch):
             if table == "case_summary":
                 rows = [["COLLECTOR_1"]]
             elif table == "network_edges":
-                rows = [["EDGE_1", "A1"]]
+                rows = [["EDGE_1", "A1", "A2", "fund_flow", None, "12.5", "true", "true"]]
             else:
                 rows = [[table]]
             return _response(columns, rows, statement_id=table)
@@ -63,7 +72,34 @@ def test_load_gold_tables_queries_all_persisted_tables(monkeypatch):
     assert len(calls) == len(GOLD_TABLE_NAMES)
     assert all(call[1:] == ("warehouse-1", "50s") for call in calls)
     assert gold["_seed_account"] == "COLLECTOR_1"
-    assert list(gold["_network_edges_raw"].columns) == ["account_a"]
+    network_edges_raw = gold["_network_edges_raw"]
+    assert list(network_edges_raw.columns) == [
+        "account_a",
+        "account_b",
+        "edge_type",
+        "device_id",
+        "amount",
+        "strict_included",
+        "permissive_included",
+    ]
+    assert network_edges_raw.dtypes.astype(str).to_dict() == {
+        "account_a": "object",
+        "account_b": "object",
+        "edge_type": "object",
+        "device_id": "object",
+        "amount": "float64",
+        "strict_included": "bool",
+        "permissive_included": "bool",
+    }
+    assert network_edges_raw.iloc[0].to_dict() == {
+        "account_a": "A1",
+        "account_b": "A2",
+        "edge_type": "fund_flow",
+        "device_id": None,
+        "amount": 12.5,
+        "strict_included": True,
+        "permissive_included": True,
+    }
     assert isinstance(gold["accounts"], pd.DataFrame)
 
 

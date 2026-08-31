@@ -140,7 +140,9 @@ Run all cells. The final cell prints a row count for every Gold table, confirmin
 
 1. In the Databricks workspace, open **Genie** and choose **New Genie Space**.
 2. Select the catalog and schema from 3.2 (`mulegraph.investigations` by default).
-3. Add all eight Gold tables as data sources.
+3. Add all eight Gold tables plus the four policy-scoped views (`evidence_strict_v`,
+   `evidence_permissive_v`, `network_edges_strict_v`, and `network_edges_permissive_v`) as data
+   sources. Genie uses these views for policy-scoped evidence and network questions.
 4. Optionally reuse the table and column comments in
    `scripts/sql/01_setup_catalog_and_schema.sql` as Genie instructions/context.
 5. Copy the Genie Space ID from its workspace URL or settings. You will supply it at deployment.

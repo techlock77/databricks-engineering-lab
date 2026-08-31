@@ -77,9 +77,14 @@ def genie_query(
         )
 
     workspace = client or WorkspaceClient()
+    evidence_view = f"evidence_{context.evidence_policy}_v"
+    network_view = f"network_edges_{context.evidence_policy}_v"
     prompt = (
         f"Investigation context: seed account {context.seed_account}; evidence policy "
-        f"{context.evidence_policy}. Answer using only the persisted MuleGraph Gold tables. "
+        f"{context.evidence_policy}. For this question, query only `{evidence_view}` and "
+        f"`{network_view}` for evidence and network questions. Do not query the raw "
+        "`evidence` or `network_edges` tables, which mix both policies. "
+        "Answer using only the persisted MuleGraph Gold tables and these policy-scoped views. "
         f"Question: {question}"
     )
     message = workspace.genie.start_conversation_and_wait(space_id=space_id, content=prompt)

@@ -40,6 +40,9 @@ def test_genie_query_calls_real_sdk_surface_and_maps_contract(monkeypatch):
     assert genie.calls[0][0] == "space-1"
     assert "MULE_1" in genie.calls[0][1]
     assert "strict" in genie.calls[0][1]
+    assert "`evidence_strict_v`" in genie.calls[0][1]
+    assert "`network_edges_strict_v`" in genie.calls[0][1]
+    assert "Do not query the raw `evidence` or `network_edges` tables" in genie.calls[0][1]
     assert response == GenieResponse(
         question="Why flagged?",
         answer="The persisted evidence shows a fan-out pattern.",

@@ -134,3 +134,26 @@ CREATE TABLE IF NOT EXISTS export_citations (
     account_id STRING,
     citation_text STRING
 ) USING DELTA;
+
+-- ---------------------------------------------------------------------------
+-- 3. Policy-scoped views for Genie
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE VIEW evidence_strict_v AS
+SELECT *
+FROM evidence
+WHERE evidence_type IN ('device_and_fund_flow', 'account_takeover_provenance');
+
+CREATE OR REPLACE VIEW evidence_permissive_v AS
+SELECT *
+FROM evidence;
+
+CREATE OR REPLACE VIEW network_edges_strict_v AS
+SELECT *
+FROM network_edges
+WHERE strict_included = TRUE;
+
+CREATE OR REPLACE VIEW network_edges_permissive_v AS
+SELECT *
+FROM network_edges
+WHERE permissive_included = TRUE;
