@@ -10,7 +10,7 @@ Complete the stages in order. Keep the supplied `demos/fraud-genie-agent/app` fo
 
 1. Open the Free Edition sign-in link received at registration and sign in. If an account page lists workspaces, click the workspace to use.
 2. Record `<REPLACE_ME_WORKSPACE_HOST>` from the browser address bar: copy the URL through the Databricks domain, such as `https://dbc-12345678-abcd.cloud.databricks.com`, without the page path. This merely identifies the workspace; the app receives its host automatically.
-3. Find the left navigation. Expand it or hover over icons to see labels. This guide uses **SQL Editor**, **SQL Warehouses**, **Workspace**, **Catalog**, **Genie**, and **Databricks Apps**. If hidden, use the app switcher; data tools are under **Analytics and AI** and apps under **Databricks Apps**.
+3. Find the left navigation. Expand it or hover over icons to see labels. This guide uses **SQL Editor**, **SQL Warehouses**, **Workspace**, **Catalog**, **Genie**, and **Databricks Apps**. If hidden, use the app switcher—the grid/dots icon near the Databricks logo that switches between Data, Machine Learning, Apps, and other areas; data tools are under **Analytics and AI** and apps under **Databricks Apps**.
 
 ### RUN
 
@@ -33,7 +33,7 @@ Confirm the URL starts with `<REPLACE_ME_WORKSPACE_HOST>`, your profile appears 
 ### DO
 
 1. Click **SQL Editor** > **New query**.
-2. Use the top **Compute** selector to choose a SQL warehouse. If none exists, click **SQL Warehouses** > **Create SQL warehouse**, accept the Free Edition defaults, and click **Create**.
+2. Use the top **Compute** selector to choose a SQL warehouse (the compute that runs your SQL queries). If none exists, click **SQL Warehouses** > **Create SQL warehouse**, accept the Free Edition defaults, and click **Create**.
 3. Paste the complete, verbatim contents of `scripts/sql/01_setup_catalog_and_schema.sql` below into the query editor:
 
 ```sql
@@ -300,10 +300,11 @@ It must query `mulegraph.investigations.case_summary`, report 3 cases, and calcu
 ### DO
 
 1. Click **SQL Warehouses**, open the warehouse used above, then **Connection details**. Record `<REPLACE_ME_SQL_WAREHOUSE_ID>` from the details/page URL and `<REPLACE_ME_SQL_WAREHOUSE_HTTP_PATH>` from **HTTP path**. The code needs only the ID; recording the HTTP path helps verify that the same warehouse was selected.
-2. Open the app switcher > **Databricks Apps** (some layouts show **Compute** > **Apps**). Click **Create app** > **Create a custom app**. Name it `mulegraph-investigator`, or use `<REPLACE_ME_UNIQUE_APP_NAME>` for a unique lowercase/hyphenated name.
+2. Look at the left sidebar. If you see an item literally labeled **Apps**, click it directly. If you do not see it there, click the app-switcher icon (the grid/dots icon, usually top-left near the Databricks logo) and choose **Databricks Apps** from that menu. Click **Create app** > **Create a custom app**. Name it `mulegraph-investigator`, or use `<REPLACE_ME_UNIQUE_APP_NAME>` for a unique lowercase/hyphenated name.
 3. In **App resources**, click **+ Add resource** > **SQL warehouse**. Select the warehouse matching the recorded ID/path, permission **Can use**, and set its custom resource key to exactly `sql_warehouse` (underscore).
 4. Add **Genie Agent** (sometimes **Genie Space**). Select the space matching `<REPLACE_ME_GENIE_SPACE_ID>`, permission **Can run**, and key exactly `genie_space`.
-5. Add each of the 8 tables and 4 views from Stage 2 as **Unity Catalog table** resources with **Select**. Their generated keys are unused and may remain unchanged. This grants the app identity `USE CATALOG`, `USE SCHEMA`, and `SELECT`. If views are unavailable as resources, open each view under **Catalog** > **Permissions** > **Grant**, choose the service principal shown on the app's **Authorization** tab, and grant **SELECT**.
+   If neither **Genie Agent** nor **Genie Space** is offered as an App resource type, open the app's **Environment** / **Settings** UI, add a plain custom environment variable named exactly `DATABRICKS_GENIE_SPACE_ID` with `<REPLACE_ME_GENIE_SPACE_ID>` as its literal value, and skip the `valueFrom: genie_space` indirection for this variable only.
+5. Add each of the 8 tables and 4 views from Stage 2 as **Unity Catalog table** resources with **Select**. Their generated keys are unused and may remain unchanged. This grants the app identity `USE CATALOG`, `USE SCHEMA`, and `SELECT`. If views are unavailable as resources, open each view under **Catalog** > **Permissions** > **Grant**, choose the service principal (the automatic technical identity Databricks creates for your app) shown on the app's **Authorization** tab, and grant **SELECT**.
 
 The complete checked-in `app.yaml` is reproduced verbatim:
 
@@ -368,7 +369,7 @@ Click its ask/send button and wait for the result.
 
 ### VALIDATE
 
-The answer must reference the displayed seed account; contain persisted findings; show at least one `Databricks Genie` citation/query attachment; show a freshness note derived from `freshness`; and use `evidence_strict_v` and/or `network_edges_strict_v` rather than raw policy-mixing tables. Switch to **Permissive**, repeat, and confirm the permissive views are used.
+The answer must reference the displayed seed account; contain persisted findings; show at least one `Databricks Genie` citation/query attachment; show a freshness note derived from `freshness`; and use `evidence_strict_v` and/or `network_edges_strict_v` rather than raw policy-mixing tables. Switch to **Permissive**, repeat, and confirm the permissive views are used. Compare the strict and permissive answers and confirm that the connected-account count and/or total exposure differs: for the seed case, the stricter cohort definition should shrink the network relative to the permissive policy.
 
 The deployed code has no silent mock/canned fallback. A real answer with Genie attachments proves this path:
 
