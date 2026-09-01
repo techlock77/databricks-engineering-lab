@@ -63,7 +63,7 @@ GENIE_QUESTIONS = [
     "What would we have missed investigating only the original transaction?",
 ]
 GENIE_INVESTIGATION_QUESTION = "Why was this account flagged?"
-TAB_NAMES = ["Overview", "Investigation", "Network", "Ask Genie"]
+TAB_NAMES = ["Overview", "Investigation", "Money Flow", "Network", "Genie", "Reports"]
 
 
 @st.cache_resource
@@ -98,7 +98,7 @@ def _queue_genie_question(question: str) -> None:
     st.session_state.chat_history.append({"role": "user", "content": question})
     st.session_state.pending_question = question
     st.session_state.is_querying = True
-    st.session_state.target_tab = "Ask Genie"
+    st.session_state.target_tab = "Genie"
 
 
 def render_freshness_banner(gold: dict) -> None:
@@ -168,12 +168,63 @@ def render_control_cohort_tab(gold: dict) -> None:
     st.dataframe(gold["control_cohort"], use_container_width=True, hide_index=True)
 
 
+def render_control_comparison(comparison: dict) -> None:
+    st.caption(
+        "Case vs. control median: "
+        f"{comparison['case_tenure_days']} vs. "
+        f"{comparison['control_median_tenure_days']} tenure days; "
+        f"{comparison['case_outbound_months']} vs. "
+        f"{comparison['control_median_outbound_months']} outbound months."
+    )
+
+
+def render_money_flow_tab(gold: dict, seed_account: str, evidence_policy: str) -> None:
+    st.caption(f"Evidence policy: {evidence_policy}")
+    transfers = views.case_transfers(gold, seed_account, evidence_policy)
+    st.dataframe(transfers, use_container_width=True, hide_index=True)
+    monthly_totals = (
+        transfers.groupby("month", as_index=False)["amount"].sum().sort_values("month")
+    )
+    st.subheader("Monthly amount totals")
+    st.bar_chart(
+        monthly_totals,
+        x="month",
+        y="amount",
+        use_container_width=True,
+    )
+
+
+def _graphviz_dot(edges) -> str:
+    lines = ["graph mulegraph {", '  graph [bgcolor="transparent"];']
+    for row in edges.itertuples(index=False):
+        amount = f"${row.amount:,.2f}" if row.amount else "$0.00"
+        label = f"{row.edge_type} | {amount}"
+        lines.append(f'  "{row.account_a}" -- "{row.account_b}" [label="{label}"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def render_network_graph(gold: dict, seed_account: str, evidence_policy: str) -> None:
+    network = views.compute_network(gold, seed_account, evidence_policy)
+    st.subheader("Relationship graph")
+    st.graphviz_chart(_graphviz_dot(network.edges), use_container_width=True)
+
+
 def _render_chat_history() -> None:
     for turn in st.session_state.chat_history:
         with st.chat_message(turn["role"]):
-            st.write(turn["content"])
-            for citation in turn.get("citations", []):
-                st.caption(f"Source: {citation.source_table}#{citation.source_row_id} -- {citation.text}")
+            if turn["role"] == "user":
+                st.markdown(f"**Question:** {turn['content']}")
+            else:
+                st.write(turn["content"])
+            citations = turn.get("citations", [])
+            if citations:
+                with st.expander("View evidence", expanded=True):
+                    for citation in citations:
+                        st.write(
+                            f"{citation.source_table}#{citation.source_row_id}: "
+                            f"{citation.text}"
+                        )
             if turn.get("freshness"):
                 st.caption(turn["freshness"])
 
@@ -234,12 +285,11 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
         finally:
             st.session_state.pending_question = None
             st.session_state.is_querying = False
-            st.session_state.target_tab = "Ask Genie"
+            st.session_state.target_tab = "Genie"
         st.rerun()
 
 
-def render_export_button(gold: dict, seed_account: str, evidence_policy: str) -> None:
-    bundle = build_case_export(gold, seed_account, evidence_policy)
+def render_export_button(bundle, evidence_policy: str) -> None:
     st.caption(
         f"Export ready: {bundle.item_count} citation-backed item(s) under the "
         f"{evidence_policy} policy."
@@ -250,6 +300,31 @@ def render_export_button(gold: dict, seed_account: str, evidence_policy: str) ->
         data=export_text,
         file_name=f"{bundle.case_id}_{evidence_policy}.txt",
     )
+
+
+def render_reports_tab(
+    gold: dict, seed_account: str, evidence_policy: str, metrics: dict
+) -> None:
+    bundle = build_case_export(gold, seed_account, evidence_policy)
+    st.subheader("Case file")
+    st.write(f"**Case:** {bundle.case_id}")
+    st.caption(
+        f"Seed account: {bundle.seed_account} · Evidence policy: {bundle.evidence_policy}"
+    )
+    st.subheader("KPI recap")
+    st.write(
+        f"Linked exposure: ${metrics['total_exposure']:,.2f} · "
+        f"Connected accounts: {metrics['other_connected_accounts_count']} · "
+        f"Potential victims: {metrics['potential_victims_count']} · "
+        f"Shared devices: {metrics['shared_device_count']}"
+    )
+    st.subheader("Export evidence")
+    item_types = sorted({item.item_type for item in bundle.items})
+    for item_type in item_types:
+        st.write(f"**{item_type.replace('_', ' ').title()}**")
+        for item in (item for item in bundle.items if item.item_type == item_type):
+            st.write(f"{item.source_table}#{item.source_row_id}: {item.text}")
+    render_export_button(bundle, evidence_policy)
 
 
 def main() -> None:
@@ -263,10 +338,18 @@ def main() -> None:
             border-radius: 0.75rem;
             padding: 0.9rem 1rem;
         }
-        [data-testid="stTabs"] { margin-top: 0.75rem; }
-        .stChatMessage {
+        [data-testid="stDataFrame"], [data-testid="stExpander"], .stChatMessage {
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
             border: 1px solid rgba(230, 237, 243, 0.10);
             border-radius: 0.75rem;
+        }
+        h2, h3 {
+            color: rgba(230, 237, 243, 0.82);
+            letter-spacing: 0.025em;
+        }
+        [data-testid="stTabs"] { margin-top: 0.75rem; }
+        .stChatMessage {
+            padding: 0.25rem;
         }
         </style>
         """,
@@ -277,8 +360,12 @@ def main() -> None:
     render_case_header(gold, seed_account)
     evidence_policy = st.session_state.evidence_policy
     metrics = views.blast_radius_metrics(gold, seed_account, evidence_policy)
+    control_comparison = views.control_cohort_comparison(gold, seed_account)
     render_kpi_strip(gold, seed_account, metrics)
+    render_control_comparison(control_comparison)
+    st.divider()
     render_freshness_banner(gold)
+    st.divider()
 
     requested_tab = st.session_state.target_tab
     st.session_state.target_tab = None
@@ -286,13 +373,20 @@ def main() -> None:
     tabs_kwargs = {"key": "main_tabs"} if "key" in tabs_parameters else {}
     if requested_tab in TAB_NAMES and "default" in tabs_parameters:
         tabs_kwargs["default"] = requested_tab
-    tab_overview, tab_investigation, tab_network, tab_genie = st.tabs(TAB_NAMES, **tabs_kwargs)
+    (
+        tab_overview,
+        tab_investigation,
+        tab_money_flow,
+        tab_network,
+        tab_genie,
+        tab_reports,
+    ) = st.tabs(TAB_NAMES, **tabs_kwargs)
 
     with tab_overview:
         st.subheader("Investigation actions")
         action_trace, action_network, action_genie = st.columns(3)
         action_trace.button(
-            "Trace Funds", on_click=_target_tab, args=("Investigation",), use_container_width=True
+            "Trace Funds", on_click=_target_tab, args=("Money Flow",), use_container_width=True
         )
         action_network.button(
             "View Connected Accounts",
@@ -326,18 +420,27 @@ def main() -> None:
         with col_reset:
             st.write("")
             st.button("Reset to default policy", on_click=_reset_evidence_policy)
+        st.divider()
         render_evidence_tab(gold, evidence_policy)
         with st.expander("Legitimate control cohort (audit)", expanded=False):
             render_control_cohort_tab(gold)
 
+    with tab_money_flow:
+        if requested_tab == "Money Flow":
+            st.info("Trace Funds selected — review the policy-scoped transfers below.")
+        render_money_flow_tab(gold, seed_account, evidence_policy)
+
     with tab_network:
         if requested_tab == "Network":
             st.info("Connected Accounts selected — review the linked network below.")
+        render_network_graph(gold, seed_account, evidence_policy)
         render_connected_accounts_tab(gold, seed_account, evidence_policy)
 
     with tab_genie:
         render_genie_chat(gold, seed_account)
-        render_export_button(gold, seed_account, evidence_policy)
+
+    with tab_reports:
+        render_reports_tab(gold, seed_account, evidence_policy, metrics)
 
 
 main()
