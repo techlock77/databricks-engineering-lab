@@ -61,6 +61,18 @@ def _documented_questions():
     return re.findall(r"^- (.+)$", section, flags=re.MULTILINE)
 
 
+def _open_flagged_case(app):
+    app.button(key="open_case_ACC_M_COLLECTOR").click().run(timeout=10)
+    assert app.session_state["selected_account"] == "ACC_M_COLLECTOR"
+    return app
+
+
+def _select_section(app, section):
+    app.radio(key="active_section").set_value(section).run(timeout=10)
+    assert app.session_state["active_section"] == section
+    return app
+
+
 def test_path_bootstrap_works_without_file(monkeypatch):
     app_root = APP_PATH.parents[2]
     monkeypatch.chdir(app_root)
@@ -127,9 +139,11 @@ def test_page_config_sets_investigation_icon():
 
 def test_money_flow_dataframe_and_monthly_bar_chart_render_with_real_streamlit():
     app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+    _select_section(app, "Money Flow")
 
     assert not app.exception
-    assert len(app.dataframe) == 4
+    assert len(app.dataframe) == 1
     transfers = next(
         dataframe.value
         for dataframe in app.dataframe
@@ -146,18 +160,25 @@ def test_money_flow_dataframe_and_monthly_bar_chart_render_with_real_streamlit()
     assert '"field": "amount"' in charts[0].proto.spec
 
 
-def test_new_tab_structure_kpis_and_documented_genie_questions_render_once():
+def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders():
     app = AppTest.from_string(_app_script()).run(timeout=10)
 
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == [
+    assert [radio.options for radio in app.radio] == [[
         "Overview",
         "Investigation",
         "Money Flow",
         "Network",
-        "Genie",
         "Reports",
-    ]
+    ]]
+    assert any("Alert Queue" in item.value for item in app.subheader)
+    assert any("1 active alert" in caption.value for caption in app.caption)
+    assert app.button(key="open_case_ACC_M_COLLECTOR").label == "Open case →"
+
+    _open_flagged_case(app)
+
+    assert app.session_state["active_section"] == "Overview"
+    assert any("Case: ACC_M_COLLECTOR" in item.value for item in app.subheader)
     assert [metric.label for metric in app.metric] == [
         "Risk band",
         "Linked exposure",
@@ -183,15 +204,7 @@ def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplic
     app.button(key="genie_suggestion_0").click().run(timeout=10)
 
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == [
-        "Overview",
-        "Investigation",
-        "Money Flow",
-        "Network",
-        "Genie",
-        "Reports",
-    ]
-    assert len(app.metric) == 6
+    assert app.session_state["active_section"] == "Overview"
     assert f"**Question:** {question}" in [item.value for item in app.markdown]
     assert [status.label for status in app.status] == ["Genie is investigating..."]
     assert app.chat_input[0].disabled
@@ -203,12 +216,15 @@ def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplic
 
 def test_investigate_with_genie_submits_the_approved_question():
     app = AppTest.from_string(_app_script("paused")).run(timeout=10)
+    _open_flagged_case(app)
 
     investigate_button = next(
         button for button in app.button if button.label == "Investigate with Genie"
     )
     investigate_button.click().run(timeout=10)
 
+    assert app.session_state["active_section"] == "Investigation"
+    assert any("evidence_id" in dataframe.value.columns for dataframe in app.dataframe)
     assert "**Question:** Why was this account flagged?" in [
         item.value for item in app.markdown
     ]
@@ -229,12 +245,15 @@ def test_genie_error_becomes_assistant_message_instead_of_crashing():
 
 def test_network_graph_and_structured_reports_render():
     app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+    _select_section(app, "Network")
 
     assert not app.exception
     graphs = [element for element in app._tree if element.type == "graphviz_chart"]
     assert len(graphs) == 1
     assert "ACC_M_COLLECTOR" in graphs[0].proto.spec
     assert "device_and_fund_flow" in graphs[0].proto.spec
+    _select_section(app, "Reports")
     rendered_text = [item.value for item in app.markdown]
     assert "**Case:** CASE_ACC_M_COLLECTOR" in rendered_text
     assert "**Case Summary**" in rendered_text
@@ -264,12 +283,45 @@ def test_genie_response_renders_insight_card_evidence_and_freshness():
 
 def test_policy_toggle_updates_network_graph_scope():
     app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+    _select_section(app, "Network")
     permissive_graph = next(
         element for element in app._tree if element.type == "graphviz_chart"
     )
     assert "ACC_M_LOOKALIKE" in permissive_graph.proto.spec
 
-    app.radio[0].set_value("strict").run(timeout=10)
+    _select_section(app, "Investigation")
+    app.radio(key="evidence_policy").set_value("strict").run(timeout=10)
+    _select_section(app, "Network")
 
     strict_graph = next(element for element in app._tree if element.type == "graphviz_chart")
     assert "ACC_M_LOOKALIKE" not in strict_graph.proto.spec
+
+
+def test_overview_action_buttons_render_the_selected_section_content():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+
+    next(button for button in app.button if button.label == "Trace Funds").click().run(timeout=10)
+    assert app.session_state["active_section"] == "Money Flow"
+    assert any("Monthly amount totals" in item.value for item in app.subheader)
+    assert any("txn_id" in dataframe.value.columns for dataframe in app.dataframe)
+
+    _select_section(app, "Overview")
+    next(
+        button for button in app.button if button.label == "View Connected Accounts"
+    ).click().run(timeout=10)
+    assert app.session_state["active_section"] == "Network"
+    assert any("Relationship graph" in item.value for item in app.subheader)
+    assert any(element.type == "graphviz_chart" for element in app._tree)
+
+
+def test_genie_panel_is_persistent_on_every_section():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+
+    for section in ["Overview", "Investigation", "Money Flow", "Network", "Reports"]:
+        _select_section(app, section)
+        headers = [item.value for item in app.subheader]
+        assert any("Genie is on this case" in header for header in headers)
+        assert app.button(key="genie_suggestion_0").label == _documented_questions()[0]
