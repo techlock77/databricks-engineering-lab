@@ -358,7 +358,8 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
         st.rerun()
 
 
-def render_alert_queue(gold: dict) -> None:
+def _sorted_flagged_accounts(gold: dict):
+    """Return the alert queue in its single canonical priority order."""
     flagged = gold["accounts"][gold["accounts"]["is_flagged_mule_network"].astype(bool)].copy()
     risk_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
     flagged["_risk_order"] = flagged["risk_band"].astype(str).str.lower().map(risk_order).fillna(0)
@@ -376,7 +377,120 @@ def render_alert_queue(gold: dict) -> None:
         None,
     )
     sort_columns = ["_risk_order"] + ([exposure_column] if exposure_column else [])
-    flagged = flagged.sort_values(sort_columns, ascending=False)
+    return flagged.sort_values(sort_columns, ascending=False)
+
+
+def _case_summary_row(gold: dict, account_id: str):
+    return gold["case_summary"][
+        gold["case_summary"]["seed_account"].astype(str) == account_id
+    ].iloc[0]
+
+
+def render_landing_hero(gold: dict, flagged) -> None:
+    top_account = str(flagged.iloc[0]["account_id"])
+    top_case = _case_summary_row(gold, top_account)
+    container_kwargs = (
+        {"key": "hero_card"} if "key" in inspect.signature(st.container).parameters else {}
+    )
+    with st.container(**container_kwargs):
+        st.markdown('<span class="hero-card-floor-marker"></span>', unsafe_allow_html=True)
+        introduction, featured = st.columns([3, 2], gap="large")
+        with introduction:
+            st.markdown(
+                '<p class="hero-eyebrow">FRAUD DETECTION · MULEGRAPH</p>'
+                '<h1 class="hero-headline">Find the network before the money moves</h1>'
+                '<p class="hero-subheadline">Turn a prioritized alert into a grounded, '
+                'network-wide investigation before suspicious funds disappear.</p>',
+                unsafe_allow_html=True,
+            )
+            refreshed = gold["freshness"].iloc[0]["last_refreshed_ts"]
+            st.markdown(
+                f'<p class="hero-stat">{len(gold["case_summary"])} scenario cases · '
+                f'{len(gold["accounts"])} accounts · {refreshed} refreshed</p>',
+                unsafe_allow_html=True,
+            )
+            primary, secondary = st.columns(2)
+            primary.button(
+                "Open highest-priority case →",
+                key="open_highest_priority_case",
+                on_click=_open_case,
+                args=(top_account,),
+                use_container_width=True,
+            )
+            secondary.markdown(
+                '<a class="hero-link" href="#ask-genie">Ask Genie a question</a>',
+                unsafe_allow_html=True,
+            )
+        with featured:
+            with st.container(border=True):
+                st.markdown("**TODAY'S FLAGGED CASE**")
+                st.markdown(f"### {top_case.scenario_label}")
+                st.caption(f"Risk band: {str(flagged.iloc[0]['risk_band']).upper()}")
+                exposure = float(top_case.total_exposure_permissive)
+                st.markdown(f"**${exposure:,.2f}** linked exposure")
+                st.caption(
+                    f"{int(top_case.other_connected_accounts_permissive)} connected accounts"
+                )
+                st.button(
+                    "Open this case →",
+                    key="open_featured_case",
+                    on_click=_open_case,
+                    args=(top_account,),
+                    use_container_width=True,
+                )
+
+
+def render_scenario_row(gold: dict) -> None:
+    container_kwargs = (
+        {"key": "scenario_row"}
+        if "key" in inspect.signature(st.container).parameters
+        else {}
+    )
+    with st.container(**container_kwargs):
+        st.markdown('<span class="scenario-row-floor-marker"></span>', unsafe_allow_html=True)
+        columns = st.columns(len(gold["case_summary"]))
+        for column, row in zip(columns, gold["case_summary"].itertuples(index=False)):
+            column.button(
+                str(row.scenario_label),
+                key=f"scenario_chip_{row.scenario_type}",
+                on_click=_open_case,
+                args=(str(row.seed_account),),
+                use_container_width=True,
+            )
+
+
+def render_process_cards() -> None:
+    cards = [
+        (
+            "01 · SPOT THE ALERT",
+            "Start from one flagged account and see why it was prioritized for investigator review.",
+        ),
+        (
+            "02 · ASK GENIE",
+            "Ask a grounded question about the case and get an answer from the investigation-ready Gold data.",
+        ),
+        (
+            "03 · FOLLOW THE MONEY",
+            "Trace shared devices and fund flow outward to reveal the full connected network.",
+        ),
+        (
+            "04 · REVEAL THE PATTERN",
+            "Toggle the evidence policy to separate fund-flow-corroborated facts from weaker device-only links.",
+        ),
+    ]
+    columns = st.columns(4)
+    for column, (title, description) in zip(columns, cards):
+        with column.container(border=True):
+            st.markdown(f"**{title}**")
+            st.write(description)
+    st.caption(
+        "Every number -- strict or permissive -- comes from the same eight Gold tables, "
+        "so the UI, the export, and Genie can never quietly disagree."
+    )
+
+
+def render_alert_queue(gold: dict, flagged=None) -> None:
+    flagged = _sorted_flagged_accounts(gold) if flagged is None else flagged
 
     alert_count = len(flagged)
     st.subheader("Alert Queue")
@@ -483,6 +597,47 @@ def main() -> None:
         .stChatMessage {
             padding: 0.25rem;
         }
+        .st-key-hero_card, [data-testid="stVerticalBlock"]:has(.hero-card-floor-marker) {
+            border: 1px solid __BORDER__; background: __SURFACE__; color: __TEXT__;
+            border-radius: 0.75rem; box-shadow: 0 8px 24px __SHADOW__;
+            padding: 1.25rem;
+        }
+        .hero-eyebrow { color: __BORDER__; font-size: 0.75rem; font-weight: 700;
+            letter-spacing: 0.08em; margin: 0 0 0.65rem; }
+        .hero-headline { color: __TEXT__; font-size: clamp(2.25rem, 5vw, 4.5rem);
+            font-weight: 800; letter-spacing: -0.04em; line-height: 0.98; margin: 0; }
+        .hero-subheadline { color: __TEXT__; opacity: 0.72; font-size: 1.05rem;
+            margin: 1rem 0 0.65rem; max-width: 44rem; }
+        .hero-stat { color: __TEXT__; opacity: 0.78; font-size: 0.85rem; }
+        .hero-link { display: block; border: 1px solid __BORDER__; border-radius: 0.5rem;
+            color: __TEXT__ !important; padding: 0.45rem 0.75rem; text-align: center;
+            text-decoration: none !important; }
+        .st-key-scenario_row [data-testid="stHorizontalBlock"],
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) > [data-testid="stHorizontalBlock"] {
+            gap: 0.35rem;
+        }
+        .st-key-scenario_row [data-testid="column"] button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) > [data-testid="stHorizontalBlock"] [data-testid="column"] button {
+            min-height: 4.25rem; border-width: 2px; font-size: 0.72rem;
+        }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+1) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+1) button { border-color: #ef4444; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+2) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+2) button { border-color: #f97316; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+3) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+3) button { border-color: #eab308; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+4) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+4) button { border-color: #22c55e; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+5) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+5) button { border-color: #14b8a6; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+6) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+6) button { border-color: #06b6d4; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+7) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+7) button { border-color: #3b82f6; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+8) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+8) button { border-color: #8b5cf6; }
+        .st-key-scenario_row [data-testid="column"]:nth-child(9n+9) button,
+        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+9) button { border-color: #ec4899; }
         @media (max-width: 768px) {
             .st-key-kpi_strip [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
             .st-key-kpi_strip [data-testid="column"] { flex: 1 1 160px; }
@@ -534,10 +689,16 @@ def main() -> None:
         label_visibility="collapsed",
     )
 
+    if selected_account is None:
+        flagged = _sorted_flagged_accounts(gold)
+        render_landing_hero(gold, flagged)
+        render_scenario_row(gold)
+        render_process_cards()
+
     section_column, genie_column = st.columns([2, 1], gap="large")
     with section_column:
         if selected_account is None:
-            render_alert_queue(gold)
+            render_alert_queue(gold, flagged)
         else:
             render_case_header(gold, seed_account)
             metrics = views.blast_radius_metrics(gold, seed_account, evidence_policy)
@@ -610,6 +771,7 @@ def main() -> None:
                 "Genie is currently disabled for this demo -- questions will return "
                 "a static explanation instead of a live answer."
             )
+        st.markdown('<span id="ask-genie"></span>', unsafe_allow_html=True)
         st.subheader("🔎 Genie is on this case")
         render_genie_chat(gold, seed_account)
 
