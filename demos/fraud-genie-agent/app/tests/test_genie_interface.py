@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from databricks.sdk.errors import OperationFailed
+from databricks.sdk.service.dashboards import GenieMessage, MessageError, MessageErrorType
 
 from src.genie.interface import Citation, GenieContext, GenieResponse, genie_query
 
@@ -30,9 +32,11 @@ def test_genie_query_calls_real_sdk_surface_and_maps_contract(monkeypatch):
         def __init__(self):
             self.calls = []
 
-        def start_conversation_and_wait(self, space_id, content):
+        def start_conversation(self, space_id, content):
             self.calls.append((space_id, content))
-            return SimpleNamespace(content="", attachments=[attachment])
+            return SimpleNamespace(
+                result=lambda: SimpleNamespace(content="", attachments=[attachment])
+            )
 
     genie = GenieApi()
     response = genie_query("Why flagged?", _context(), client=SimpleNamespace(genie=genie))
@@ -50,6 +54,103 @@ def test_genie_query_calls_real_sdk_surface_and_maps_contract(monkeypatch):
         freshness_note="Evidence as of 2026-01-01T00:00:00 (freshness contract: 24h, current).",
         evidence_policy="strict",
     )
+
+
+def test_genie_query_surfaces_failed_message_error(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_GENIE_SPACE_ID", "space-1")
+    operation_failure = OperationFailed(
+        "failed to reach COMPLETED, got MessageStatus.FAILED"
+    )
+
+    class MessageWaiter:
+        conversation_id = "conversation-1"
+        message_id = "message-1"
+
+        def result(self):
+            raise operation_failure
+
+    genie = SimpleNamespace(
+        start_conversation=lambda **kwargs: MessageWaiter(),
+        get_message=lambda **kwargs: GenieMessage(
+            id="message-1",
+            space_id="space-1",
+            conversation_id="conversation-1",
+            content="",
+            message_id="message-1",
+            error=MessageError(
+                type=MessageErrorType.TABLES_MISSING_EXCEPTION,
+                error="table not found",
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        genie_query("Why?", _context(), client=SimpleNamespace(genie=genie))
+
+    assert str(exc_info.value) == (
+        "Genie query failed (TABLES_MISSING_EXCEPTION): table not found"
+    )
+    assert "failed to reach COMPLETED" not in str(exc_info.value)
+
+
+def test_genie_query_preserves_operation_failure_when_refetch_fails(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_GENIE_SPACE_ID", "space-1")
+    operation_failure = OperationFailed(
+        "failed to reach COMPLETED, got MessageStatus.FAILED"
+    )
+
+    class MessageWaiter:
+        conversation_id = "conversation-1"
+        message_id = "message-1"
+
+        def result(self):
+            raise operation_failure
+
+    def fail_refetch(**kwargs):
+        raise ConnectionError("diagnostic refetch failed")
+
+    genie = SimpleNamespace(
+        start_conversation=lambda **kwargs: MessageWaiter(),
+        get_message=fail_refetch,
+    )
+
+    with pytest.raises(OperationFailed) as exc_info:
+        genie_query("Why?", _context(), client=SimpleNamespace(genie=genie))
+
+    assert exc_info.value is operation_failure
+    assert str(exc_info.value) == "failed to reach COMPLETED, got MessageStatus.FAILED"
+
+
+def test_genie_query_preserves_operation_failure_when_message_has_no_error(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_GENIE_SPACE_ID", "space-1")
+    operation_failure = OperationFailed(
+        "failed to reach COMPLETED, got MessageStatus.FAILED"
+    )
+
+    class MessageWaiter:
+        conversation_id = "conversation-1"
+        message_id = "message-1"
+
+        def result(self):
+            raise operation_failure
+
+    genie = SimpleNamespace(
+        start_conversation=lambda **kwargs: MessageWaiter(),
+        get_message=lambda **kwargs: GenieMessage(
+            id="message-1",
+            space_id="space-1",
+            conversation_id="conversation-1",
+            content="",
+            message_id="message-1",
+            error=None,
+        ),
+    )
+
+    with pytest.raises(OperationFailed) as exc_info:
+        genie_query("Why?", _context(), client=SimpleNamespace(genie=genie))
+
+    assert exc_info.value is operation_failure
+    assert str(exc_info.value) == "failed to reach COMPLETED, got MessageStatus.FAILED"
 
 
 def test_genie_query_requires_space_id(monkeypatch):

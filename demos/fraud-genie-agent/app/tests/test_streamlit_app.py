@@ -27,7 +27,9 @@ genie = patch("src.genie.interface.genie_query", side_effect=test_genie_query)
         genie_patch = """
 genie = patch(
     "src.genie.interface.genie_query",
-    side_effect=RuntimeError("Genie Space schema out of sync"),
+    side_effect=RuntimeError(
+        "Genie query failed (TABLES_MISSING_EXCEPTION): table not found"
+    ),
 )
 """
     elif genie_effect == "success":
@@ -378,7 +380,10 @@ def test_genie_error_becomes_assistant_message_instead_of_crashing():
     assert expected_fallback in rendered_text
     details = next(expander for expander in app.expander if expander.label == "Technical details")
     assert not details.proto.expanded
-    assert "RuntimeError: Genie Space schema out of sync" in rendered_text
+    assert (
+        "RuntimeError: Genie query failed (TABLES_MISSING_EXCEPTION): table not found"
+        in rendered_text
+    )
     assert not app.session_state["is_querying"]
 
 

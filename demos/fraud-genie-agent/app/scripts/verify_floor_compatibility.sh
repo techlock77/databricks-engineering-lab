@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 STREAMLIT_FLOOR_VERSION=1.32.0
+SDK_FLOOR_VERSION=0.66.0
 FLOOR_VENV=$(mktemp -d /tmp/mulegraph-streamlit-floor.XXXXXX)
 
 cleanup() {
@@ -16,11 +17,15 @@ python -m venv "$FLOOR_VENV"
   --quiet \
   --requirement "$APP_ROOT/requirements.txt" \
   "streamlit==$STREAMLIT_FLOOR_VERSION" \
+  "databricks-sdk==$SDK_FLOOR_VERSION" \
   pytest
 
 "$FLOOR_VENV/bin/python" - <<'PY'
 import inspect
+import importlib.metadata
 import streamlit
+from databricks.sdk.errors import OperationFailed
+from databricks.sdk.service import dashboards
 from streamlit.testing.v1 import AppTest
 
 expected = "1.32.0"
@@ -54,6 +59,16 @@ assert "use_container_width" in inspect.signature(streamlit.bar_chart).parameter
 assert list(inspect.signature(streamlit.divider).parameters) == []
 assert list(inspect.signature(streamlit.expander).parameters) == ["label", "expanded"]
 
+sdk_expected = "0.66.0"
+assert importlib.metadata.version("databricks-sdk") == sdk_expected
+assert OperationFailed.__module__ == "databricks.sdk.errors.sdk"
+assert list(inspect.signature(dashboards.GenieAPI.get_message).parameters) == [
+    "self", "space_id", "conversation_id", "message_id"
+]
+assert "error" in dashboards.GenieMessage.__annotations__
+assert set(dashboards.MessageError.__annotations__) == {"error", "type"}
+assert dashboards.MessageErrorType.TABLES_MISSING_EXCEPTION.value == "TABLES_MISSING_EXCEPTION"
+
 status_app = AppTest.from_string(
     """
 import inspect
@@ -72,6 +87,7 @@ assert {"label", "state", "expanded"} <= set(
     status_app.session_state["status_update_parameters"]
 )
 print(f"Verified Streamlit floor API: {streamlit.__version__}")
+print(f"Verified Databricks SDK floor API: {sdk_expected}")
 PY
 
 cd "$APP_ROOT"
