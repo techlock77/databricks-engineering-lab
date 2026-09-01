@@ -254,6 +254,16 @@ dbutils.widgets.text(
 
 7. Do not edit the cell. In the top widget bar enter: Catalog `mulegraph`; Schema `investigations`; scale `3`; seed `42`; repo path `<REPLACE_ME_APP_SOURCE_PATH>`. “Repo path” is a historical label: it means the uploaded folder directly containing `src`, not Git.
 
+> **Choosing `scale_factor` -- this affects what the Streamlit app itself shows, not just Genie.**
+> The deployed app's own single-case view (case header, Blast Radius, Evidence, export) always
+> reads whichever `case_summary` row loads first -- with `scale_factor 3` there are 3 cases and
+> no guaranteed row order, so the app can show a *different* account and different numbers on
+> every reload/redeploy. If you want the app's own UI to be predictable (e.g. to match
+> `docs/CONTEST_DEMO_SCRIPT.md`, which is written against the `ACC_M_COLLECTOR` case), rerun this
+> notebook with **`scale_factor 1`** instead -- that leaves exactly one case, so the ambiguity
+> disappears. Use `scale_factor 3` only when your goal is a richer, multi-case **Genie Space**
+> for open-ended questions and you don't need the app's own tabs to be deterministic.
+
 ### RUN
 
 Click **Run all** and wait for `Data generation complete. Genie can now query these tables.` The notebook overwrites all eight tables on every run.
