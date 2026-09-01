@@ -42,7 +42,7 @@ def blast_radius_metrics(
     gold: dict[str, pd.DataFrame], seed_account: str, evidence_policy: str
 ) -> dict:
     net = compute_network(gold, seed_account, evidence_policy)
-    case_row = gold["case_summary"].iloc[0]
+    case_row = gold["case_summary"][gold["case_summary"]["seed_account"] == seed_account].iloc[0]
     return {
         "other_connected_accounts_count": net.other_connected_accounts_count,
         "shared_device_count": net.shared_device_count,

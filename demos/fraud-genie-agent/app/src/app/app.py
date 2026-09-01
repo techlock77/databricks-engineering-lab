@@ -63,10 +63,10 @@ GENIE_QUESTIONS = [
     "What would we have missed investigating only the original transaction?",
 ]
 GENIE_INVESTIGATION_QUESTION = "Why was this account flagged?"
-TAB_NAMES = ["Overview", "Investigation", "Money Flow", "Network", "Genie", "Reports"]
+SECTION_NAMES = ["Overview", "Investigation", "Money Flow", "Network", "Reports"]
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Pulling the latest case data from the Gold tables...")
 def _load_gold_tables():
     return load_gold_tables()
 
@@ -80,16 +80,23 @@ def _init_session_state() -> None:
         st.session_state.is_querying = False
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
-    if "target_tab" not in st.session_state:
-        st.session_state.target_tab = None
+    if "active_section" not in st.session_state:
+        st.session_state.active_section = "Overview"
+    if "selected_account" not in st.session_state:
+        st.session_state.selected_account = None
 
 
 def _reset_evidence_policy() -> None:
     st.session_state.evidence_policy = policy.DEFAULT_POLICY
 
 
-def _target_tab(tab_name: str) -> None:
-    st.session_state.target_tab = tab_name
+def _select_section(section_name: str) -> None:
+    st.session_state.active_section = section_name
+
+
+def _open_case(account_id: str) -> None:
+    st.session_state.selected_account = account_id
+    st.session_state.active_section = "Overview"
 
 
 def _queue_genie_question(question: str) -> None:
@@ -98,7 +105,11 @@ def _queue_genie_question(question: str) -> None:
     st.session_state.chat_history.append({"role": "user", "content": question})
     st.session_state.pending_question = question
     st.session_state.is_querying = True
-    st.session_state.target_tab = "Genie"
+
+
+def _investigate_with_genie() -> None:
+    st.session_state.active_section = "Investigation"
+    _queue_genie_question(GENIE_INVESTIGATION_QUESTION)
 
 
 def render_freshness_banner(gold: dict) -> None:
@@ -285,8 +296,45 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
         finally:
             st.session_state.pending_question = None
             st.session_state.is_querying = False
-            st.session_state.target_tab = "Genie"
         st.rerun()
+
+
+def render_alert_queue(gold: dict) -> None:
+    flagged = gold["accounts"][gold["accounts"]["is_flagged_mule_network"].astype(bool)].copy()
+    risk_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    flagged["_risk_order"] = flagged["risk_band"].astype(str).str.lower().map(risk_order).fillna(0)
+    exposure_column = next(
+        (
+            name
+            for name in (
+                "case_total_exposure_permissive",
+                "total_exposure",
+                "linked_exposure",
+                "exposure",
+            )
+            if name in flagged
+        ),
+        None,
+    )
+    sort_columns = ["_risk_order"] + ([exposure_column] if exposure_column else [])
+    flagged = flagged.sort_values(sort_columns, ascending=False)
+
+    alert_count = len(flagged)
+    st.subheader("Alert Queue")
+    st.caption(f"{alert_count} active alert{'s' if alert_count != 1 else ''}")
+    for row in flagged.itertuples(index=False):
+        account_id = str(row.account_id)
+        with st.container(border=True):
+            details, action = st.columns([3, 1])
+            details.markdown(f"**{account_id}**")
+            details.caption(f"Risk band: {str(row.risk_band).upper()}")
+            action.button(
+                "Open case →",
+                key=f"open_case_{account_id}",
+                on_click=_open_case,
+                args=(account_id,),
+                use_container_width=True,
+            )
 
 
 def render_export_button(bundle, evidence_policy: str) -> None:
@@ -347,7 +395,27 @@ def main() -> None:
             color: rgba(230, 237, 243, 0.82);
             letter-spacing: 0.025em;
         }
-        [data-testid="stTabs"] { margin-top: 0.75rem; }
+        [data-testid="stRadio"] > label { display: none; }
+        [data-testid="stRadio"] [role="radiogroup"] {
+            gap: 0.35rem;
+            margin: 0.75rem 0;
+        }
+        [data-testid="stRadio"] [role="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        [data-testid="stRadio"] [role="radio"] + div {
+            border: 1px solid rgba(20, 184, 166, 0.24);
+            border-radius: 999px;
+            padding: 0.45rem 0.9rem;
+            background: rgba(19, 34, 56, 0.72);
+        }
+        [data-testid="stRadio"] [role="radio"][aria-checked="true"] + div {
+            border-color: rgba(20, 184, 166, 0.9);
+            background: rgba(20, 184, 166, 0.20);
+            color: #E6EDF3;
+        }
         .stChatMessage {
             padding: 0.25rem;
         }
@@ -356,91 +424,89 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     gold = _load_gold_tables()
-    seed_account = gold["_seed_account"]
-    render_case_header(gold, seed_account)
+    selected_account = st.session_state.selected_account
+    seed_account = selected_account or gold["_seed_account"]
     evidence_policy = st.session_state.evidence_policy
-    metrics = views.blast_radius_metrics(gold, seed_account, evidence_policy)
-    control_comparison = views.control_cohort_comparison(gold, seed_account)
-    render_kpi_strip(gold, seed_account, metrics)
-    render_control_comparison(control_comparison)
-    st.divider()
-    render_freshness_banner(gold)
-    st.divider()
+    st.radio(
+        "Investigation section",
+        options=SECTION_NAMES,
+        key="active_section",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
 
-    requested_tab = st.session_state.target_tab
-    st.session_state.target_tab = None
-    tabs_parameters = inspect.signature(st.tabs).parameters
-    tabs_kwargs = {"key": "main_tabs"} if "key" in tabs_parameters else {}
-    if requested_tab in TAB_NAMES and "default" in tabs_parameters:
-        tabs_kwargs["default"] = requested_tab
-    (
-        tab_overview,
-        tab_investigation,
-        tab_money_flow,
-        tab_network,
-        tab_genie,
-        tab_reports,
-    ) = st.tabs(TAB_NAMES, **tabs_kwargs)
+    section_column, genie_column = st.columns([2, 1], gap="large")
+    with section_column:
+        if selected_account is None:
+            render_alert_queue(gold)
+        else:
+            render_case_header(gold, seed_account)
+            metrics = views.blast_radius_metrics(gold, seed_account, evidence_policy)
+            control_comparison = views.control_cohort_comparison(gold, seed_account)
+            render_kpi_strip(gold, seed_account, metrics)
+            render_control_comparison(control_comparison)
+            st.divider()
+            render_freshness_banner(gold)
+            st.divider()
 
-    with tab_overview:
-        st.subheader("Investigation actions")
-        action_trace, action_network, action_genie = st.columns(3)
-        action_trace.button(
-            "Trace Funds", on_click=_target_tab, args=("Money Flow",), use_container_width=True
-        )
-        action_network.button(
-            "View Connected Accounts",
-            on_click=_target_tab,
-            args=("Network",),
-            use_container_width=True,
-        )
-        action_genie.button(
-            "Investigate with Genie",
-            on_click=_queue_genie_question,
-            args=(GENIE_INVESTIGATION_QUESTION,),
-            disabled=st.session_state.is_querying,
-            use_container_width=True,
-        )
+            if st.session_state.active_section == "Overview":
+                st.subheader("Investigation actions")
+                action_trace, action_network, action_genie = st.columns(3)
+                action_trace.button(
+                    "Trace Funds",
+                    on_click=_select_section,
+                    args=("Money Flow",),
+                    use_container_width=True,
+                )
+                action_network.button(
+                    "View Connected Accounts",
+                    on_click=_select_section,
+                    args=("Network",),
+                    use_container_width=True,
+                )
+                action_genie.button(
+                    "Investigate with Genie",
+                    on_click=_investigate_with_genie,
+                    disabled=st.session_state.is_querying,
+                    use_container_width=True,
+                )
 
-    with tab_investigation:
-        if requested_tab == "Investigation":
-            st.info("Trace Funds selected — review the evidence and policy controls below.")
-        col_policy, col_reset = st.columns([3, 1])
-        with col_policy:
-            st.radio(
-                "Evidence policy",
-                options=list(policy.VALID_POLICIES),
-                key="evidence_policy",
-                horizontal=True,
-                help=(
-                    "Strict: only fund-flow-corroborated evidence. "
-                    "Permissive: also includes weak device-only evidence."
-                ),
-            )
-        with col_reset:
-            st.write("")
-            st.button("Reset to default policy", on_click=_reset_evidence_policy)
-        st.divider()
-        render_evidence_tab(gold, evidence_policy)
-        with st.expander("Legitimate control cohort (audit)", expanded=False):
-            render_control_cohort_tab(gold)
+            if st.session_state.active_section == "Investigation":
+                col_policy, col_reset = st.columns([3, 1])
+                with col_policy:
+                    st.radio(
+                        "Evidence policy",
+                        options=list(policy.VALID_POLICIES),
+                        key="evidence_policy",
+                        horizontal=True,
+                        help=(
+                            "Strict: only fund-flow-corroborated evidence. "
+                            "Permissive: also includes weak device-only evidence."
+                        ),
+                    )
+                with col_reset:
+                    st.write("")
+                    st.button("Reset to default policy", on_click=_reset_evidence_policy)
+                st.divider()
+                render_evidence_tab(gold, evidence_policy)
+                with st.expander("Legitimate control cohort (audit)", expanded=False):
+                    render_control_cohort_tab(gold)
 
-    with tab_money_flow:
-        if requested_tab == "Money Flow":
-            st.info("Trace Funds selected — review the policy-scoped transfers below.")
-        render_money_flow_tab(gold, seed_account, evidence_policy)
+            if st.session_state.active_section == "Money Flow":
+                st.info("Trace Funds selected — review the policy-scoped transfers below.")
+                render_money_flow_tab(gold, seed_account, evidence_policy)
 
-    with tab_network:
-        if requested_tab == "Network":
-            st.info("Connected Accounts selected — review the linked network below.")
-        render_network_graph(gold, seed_account, evidence_policy)
-        render_connected_accounts_tab(gold, seed_account, evidence_policy)
+            if st.session_state.active_section == "Network":
+                st.info("Connected Accounts selected — review the linked network below.")
+                render_network_graph(gold, seed_account, evidence_policy)
+                render_connected_accounts_tab(gold, seed_account, evidence_policy)
 
-    with tab_genie:
+            if st.session_state.active_section == "Reports":
+                render_reports_tab(gold, seed_account, evidence_policy, metrics)
+
+    with genie_column:
+        st.subheader("🔎 Genie is on this case")
         render_genie_chat(gold, seed_account)
-
-    with tab_reports:
-        render_reports_tab(gold, seed_account, evidence_policy, metrics)
 
 
 main()

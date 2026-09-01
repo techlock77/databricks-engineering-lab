@@ -35,6 +35,10 @@ assert "use_container_width" in inspect.signature(streamlit.dataframe).parameter
 assert "disabled" in inspect.signature(streamlit.button).parameters
 assert "page_icon" in inspect.signature(streamlit.set_page_config).parameters
 assert "horizontal" in inspect.signature(streamlit.radio).parameters
+assert "key" in inspect.signature(streamlit.radio).parameters
+assert "label_visibility" in inspect.signature(streamlit.radio).parameters
+assert "border" in inspect.signature(streamlit.container).parameters
+assert "gap" in inspect.signature(streamlit.columns).parameters
 assert "use_container_width" in inspect.signature(streamlit.graphviz_chart).parameters
 assert "x" in inspect.signature(streamlit.bar_chart).parameters
 assert "y" in inspect.signature(streamlit.bar_chart).parameters
