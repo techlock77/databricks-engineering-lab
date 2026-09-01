@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 import pandas as pd
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import OperationFailed
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,28 @@ def genie_query(
         "Answer using only the persisted MuleGraph Gold tables and these policy-scoped views. "
         f"Question: {question}"
     )
-    message = workspace.genie.start_conversation_and_wait(space_id=space_id, content=prompt)
+    message_waiter = workspace.genie.start_conversation(space_id=space_id, content=prompt)
+    try:
+        message = message_waiter.result()
+    except OperationFailed as operation_failure:
+        try:
+            failed_message = workspace.genie.get_message(
+                space_id=space_id,
+                conversation_id=message_waiter.conversation_id,
+                message_id=message_waiter.message_id,
+            )
+        except Exception:
+            raise operation_failure from None
+
+        message_error = getattr(failed_message, "error", None)
+        error_type = getattr(message_error, "type", None)
+        error_detail = getattr(message_error, "error", None)
+        if error_type is None and not error_detail:
+            raise operation_failure from None
+
+        error_type = getattr(error_type, "value", error_type) or "UNKNOWN"
+        error_detail = error_detail or "No error detail was returned."
+        raise RuntimeError(f"Genie query failed ({error_type}): {error_detail}") from operation_failure
     attachments = list(getattr(message, "attachments", None) or [])
     text_parts = [
         str(attachment.text.content)
