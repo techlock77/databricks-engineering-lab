@@ -65,7 +65,7 @@ def render_case_header(gold: dict, seed_account: str) -> None:
 def render_evidence_tab(gold: dict, evidence_policy: str) -> None:
     st.caption(f"Evidence policy: {evidence_policy}")
     evidence = views.filter_evidence(gold["evidence"], evidence_policy)
-    st.dataframe(evidence, width="stretch", hide_index=True)
+    st.dataframe(evidence, use_container_width=True, hide_index=True)
 
 
 def render_blast_radius_tab(gold: dict, seed_account: str, evidence_policy: str) -> None:
@@ -82,7 +82,7 @@ def render_blast_radius_tab(gold: dict, seed_account: str, evidence_policy: str)
 def render_connected_accounts_tab(gold: dict, seed_account: str, evidence_policy: str) -> None:
     st.caption(f"Evidence policy: {evidence_policy}")
     table = views.connected_accounts_table(gold, seed_account, evidence_policy)
-    st.dataframe(table, width="stretch", hide_index=True)
+    st.dataframe(table, use_container_width=True, hide_index=True)
 
 
 def render_control_cohort_tab(gold: dict) -> None:
@@ -91,7 +91,7 @@ def render_control_cohort_tab(gold: dict) -> None:
         "mule network above, protected from being flagged by the recurring-corridor "
         "override (long account tenure and a long-running monthly corridor)."
     )
-    st.dataframe(gold["control_cohort"], width="stretch", hide_index=True)
+    st.dataframe(gold["control_cohort"], use_container_width=True, hide_index=True)
 
 
 def render_genie_chat(gold: dict, seed_account: str) -> None:
