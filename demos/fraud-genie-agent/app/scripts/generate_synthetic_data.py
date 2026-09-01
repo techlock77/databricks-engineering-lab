@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # MuleGraph Investigator: Generate and Load Synthetic Data
 # MAGIC
-# MAGIC This notebook generates scaled synthetic fraud investigation data and writes
+# MAGIC This notebook generates the curated nine-scenario fraud investigation dataset and writes
 # MAGIC it to Unity Catalog Delta tables. Run this in your Databricks workspace to
 # MAGIC populate the Gold tables that Genie can query.
 # MAGIC
@@ -26,7 +26,7 @@
 
 dbutils.widgets.text("catalog", "mulegraph", "Catalog name")
 dbutils.widgets.text("schema", "investigations", "Schema name")
-dbutils.widgets.text("scale_factor", "1", "Curated nine-scenario dataset (compatibility setting)")
+dbutils.widgets.text("scale_factor", "1", "Deprecated compatibility setting (use 1)")
 dbutils.widgets.text("seed", "42", "Random seed for reproducibility")
 dbutils.widgets.text(
     "repo_path",
@@ -45,7 +45,7 @@ repo_path = dbutils.widgets.get("repo_path")
 print(f"Configuration:")
 print(f"  Catalog:      {catalog}")
 print(f"  Schema:       {schema}")
-print(f"  Scale factor: {scale_factor}")
+print(f"  Deprecated scale_factor compatibility value: {scale_factor}")
 print(f"  Seed:         {seed}")
 print(f"  Repo path:    {repo_path}")
 

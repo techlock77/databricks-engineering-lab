@@ -345,6 +345,14 @@ def test_theme_toggle_changes_literal_palette_and_documents_limitation():
     assert any("Native Streamlit chrome" in caption.value for caption in app.caption)
 
 
+def test_light_mode_css_does_not_override_native_header_color():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    app.toggle(key="light_mode").set_value(True).run(timeout=10)
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert "h2, h3" not in css
+    assert "h2" not in css and "h3" not in css
+
+
 def test_kpi_strip_has_narrowly_scoped_reflow_css():
     app = AppTest.from_string(_app_script()).run(timeout=10)
     css = next(item.value for item in app.markdown if "stMetric" in item.value)
@@ -371,6 +379,16 @@ def test_account_selector_resets_chat_and_changes_actual_kpis():
     assert first_exposure != second_exposure
 
 
+def test_non_flagged_selector_label_is_not_duplicated():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    control = next(
+        option for option in app.selectbox(key="account_selector").options
+        if "ACC_C_HUB" in option
+    )
+    assert control == "Normal account (not flagged) — ACC_C_HUB"
+    assert control.count("(not flagged)") == 1
+
+
 def test_success_replaces_initial_questions_with_hand_authored_followups():
     app = AppTest.from_string(_app_script("success")).run(timeout=10)
     initial = [app.button(key=f"genie_suggestion_{i}").label for i in range(9)]
@@ -384,6 +402,10 @@ def test_success_replaces_initial_questions_with_hand_authored_followups():
 def test_disabled_genie_never_constructs_context_or_calls_query():
     app = AppTest.from_string(_app_script("disabled")).run(timeout=10)
     app.toggle(key="genie_disabled").set_value(True).run(timeout=10)
+    assert any(
+        "Genie is currently disabled for this demo" in caption.value
+        for caption in app.caption
+    )
     app.button(key="genie_suggestion_0").click().run(timeout=10)
     assert not app.exception
     assert app.session_state["genie_mock_calls"] == 0

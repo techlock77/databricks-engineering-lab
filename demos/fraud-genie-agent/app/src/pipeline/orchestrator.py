@@ -33,14 +33,12 @@ def run_pipeline(
     seed : int
         Random seed for reproducibility.
     scale_factor : int
-        Number of independent cases to generate. At scale_factor=1 (default),
-        produces the original single-case dataset. At scale_factor > 1,
-        produces multiple independent mule networks, control cohorts, and
-        baseline accounts.
+        Deprecated compatibility argument. The curated nine-scenario dataset
+        supersedes repetition-based scaling, so values other than 1 produce
+        the same cases and emit a warning from ``generate_dataset_scaled``.
     seed_account : str, optional
-        The seed account for case-network analysis. At scale_factor=1, defaults
-        to MULE_COLLECTOR. Ignored at scale_factor > 1 (all collectors are
-        automatically included).
+        Optional single seed account. When omitted, all nine curated scenario
+        seed accounts are included.
 
     Returns
     -------

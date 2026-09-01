@@ -455,10 +455,6 @@ def main() -> None:
             border: 1px solid __BORDER__; background: __SURFACE__; color: __TEXT__;
             border-radius: 0.75rem;
         }
-        h2, h3 {
-            color: __TEXT__;
-            letter-spacing: 0.025em;
-        }
         [data-testid="stRadio"] > label { display: none; }
         [data-testid="stRadio"] [role="radiogroup"] {
             gap: 0.35rem;
@@ -503,7 +499,9 @@ def main() -> None:
     account_option_ids = {ALL_ALERTS: None}
     for account_id in case_rows["seed_account"].astype(str):
         label = f"{labels[account_id]} — {account_id}"
-        if not bool(flagged_by_account.loc[account_id]):
+        if not bool(flagged_by_account.loc[account_id]) and not labels[
+            account_id
+        ].lower().endswith("(not flagged)"):
             label += " (not flagged)"
         account_option_ids[label] = account_id
     st.session_state.account_option_ids = account_option_ids
@@ -601,6 +599,11 @@ def main() -> None:
 
     with genie_column:
         st.toggle("🔌 Disable Genie -- Demonstrate Dependency", key="genie_disabled")
+        if st.session_state.genie_disabled:
+            st.caption(
+                "Genie is currently disabled for this demo -- questions will return "
+                "a static explanation instead of a live answer."
+            )
         st.subheader("🔎 Genie is on this case")
         render_genie_chat(gold, seed_account)
 

@@ -1,3 +1,5 @@
+import pytest
+
 from src.data_generator import generator
 from src.pipeline import policy, views
 from src.pipeline.orchestrator import run_pipeline
@@ -71,3 +73,10 @@ def test_scenario_contract_reaches_accounts_and_case_summary():
     assert {"scenario_type", "scenario_label"} <= set(gold["accounts"].columns)
     assert {"scenario_type", "scenario_label"} <= set(gold["case_summary"].columns)
     assert gold["case_summary"].scenario_type.nunique() == 9
+
+
+def test_legacy_scale_factor_is_an_explicit_no_op():
+    expected = generator.generate_dataset(seed=42)
+    with pytest.warns(FutureWarning, match="no longer changes dataset size"):
+        actual = generator.generate_dataset_scaled(seed=42, scale_factor=10)
+    assert all(expected[name].equals(actual[name]) for name in expected)
