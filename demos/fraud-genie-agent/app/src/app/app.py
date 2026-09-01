@@ -64,6 +64,13 @@ GENIE_QUESTIONS = [
 ]
 GENIE_INVESTIGATION_QUESTION = "Why was this account flagged?"
 SECTION_NAMES = ["Overview", "Investigation", "Money Flow", "Network", "Reports"]
+ALL_ALERTS = "◀ All alerts"
+FOLLOW_UP_QUESTIONS = {
+    GENIE_QUESTIONS[0]: [GENIE_QUESTIONS[4], GENIE_QUESTIONS[1], GENIE_QUESTIONS[8]],
+    GENIE_QUESTIONS[1]: [GENIE_QUESTIONS[5], GENIE_QUESTIONS[4], GENIE_QUESTIONS[2]],
+    GENIE_QUESTIONS[2]: [GENIE_QUESTIONS[3], GENIE_QUESTIONS[4], GENIE_QUESTIONS[5]],
+    GENIE_INVESTIGATION_QUESTION: [GENIE_QUESTIONS[4], GENIE_QUESTIONS[1], GENIE_QUESTIONS[8]],
+}
 
 
 @st.cache_resource(show_spinner="Pulling the latest case data from the Gold tables...")
@@ -84,6 +91,14 @@ def _init_session_state() -> None:
         st.session_state.active_section = "Overview"
     if "selected_account" not in st.session_state:
         st.session_state.selected_account = None
+    if "suggestions_visible" not in st.session_state:
+        st.session_state.suggestions_visible = True
+    if "next_suggestions" not in st.session_state:
+        st.session_state.next_suggestions = []
+    if "genie_disabled" not in st.session_state:
+        st.session_state.genie_disabled = False
+    if "light_mode" not in st.session_state:
+        st.session_state.light_mode = False
 
 
 def _reset_evidence_policy() -> None:
@@ -95,7 +110,27 @@ def _select_section(section_name: str) -> None:
 
 
 def _open_case(account_id: str) -> None:
+    if st.session_state.selected_account != account_id:
+        _reset_investigation(account_id)
+    st.session_state.account_selector = next(
+        (label for label, value in st.session_state.account_option_ids.items() if value == account_id),
+        account_id,
+    )
+    st.session_state.active_section = "Overview"
+
+
+def _reset_investigation(account_id: str | None) -> None:
     st.session_state.selected_account = account_id
+    st.session_state.chat_history = []
+    st.session_state.pending_question = None
+    st.session_state.is_querying = False
+    st.session_state.suggestions_visible = True
+    st.session_state.next_suggestions = []
+
+
+def _select_account() -> None:
+    value = st.session_state.account_option_ids[st.session_state.account_selector]
+    _reset_investigation(value)
     st.session_state.active_section = "Overview"
 
 
@@ -105,6 +140,7 @@ def _queue_genie_question(question: str) -> None:
     st.session_state.chat_history.append({"role": "user", "content": question})
     st.session_state.pending_question = question
     st.session_state.is_querying = True
+    st.session_state.suggestions_visible = False
 
 
 def _investigate_with_genie() -> None:
@@ -134,16 +170,21 @@ def render_case_header(gold: dict, seed_account: str) -> None:
     st.caption(f"Risk band: {band} -- {framing}")
 
 
-def render_evidence_tab(gold: dict, evidence_policy: str) -> None:
+def render_evidence_tab(gold: dict, seed_account: str, evidence_policy: str) -> None:
     st.caption(f"Evidence policy: {evidence_policy}")
-    evidence = views.filter_evidence(gold["evidence"], evidence_policy)
+    evidence = views.case_evidence(gold, seed_account, evidence_policy)
+    if evidence.empty:
+        st.info("No evidence meets the selected policy for this case.")
     st.dataframe(evidence, use_container_width=True, hide_index=True)
 
 
 def render_kpi_strip(gold: dict, seed_account: str, metrics: dict) -> None:
     account = gold["accounts"][gold["accounts"]["account_id"] == seed_account].iloc[0]
     flagged = bool(account["is_flagged_mule_network"])
-    columns = st.columns(6)
+    container_kwargs = {"key": "kpi_strip"} if "key" in inspect.signature(st.container).parameters else {}
+    with st.container(**container_kwargs):
+        st.markdown('<span class="kpi-strip-floor-marker"></span>', unsafe_allow_html=True)
+        columns = st.columns(6)
     metric_parameters = inspect.signature(st.metric).parameters
     risk_metric_kwargs = {
         "delta": "🔴 Flagged for review" if flagged else "🟢 Not flagged",
@@ -243,15 +284,12 @@ def _render_chat_history() -> None:
 def render_genie_chat(gold: dict, seed_account: str) -> None:
     st.subheader("Ask Genie")
     st.caption("Try a grounded question about this case:")
-    for index, suggested_question in enumerate(GENIE_QUESTIONS):
-        st.button(
-            suggested_question,
-            key=f"genie_suggestion_{index}",
-            disabled=st.session_state.is_querying,
-            on_click=_queue_genie_question,
-            args=(suggested_question,),
-            use_container_width=True,
-        )
+    if st.session_state.suggestions_visible:
+        suggestions = st.session_state.next_suggestions or GENIE_QUESTIONS
+        for index, suggested_question in enumerate(suggestions):
+            st.button(suggested_question, key=f"genie_suggestion_{index}",
+                      on_click=_queue_genie_question, args=(suggested_question,),
+                      use_container_width=True)
 
     _render_chat_history()
 
@@ -264,6 +302,15 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
 
     pending_question = st.session_state.pending_question
     if pending_question:
+        if st.session_state.genie_disabled:
+            st.session_state.chat_history.append({"role": "assistant", "content": (
+                "Genie conversational tracing is unavailable while the dependency is disabled. "
+                "The KPI strip, Investigation, Money Flow, Network, and Reports remain live.")})
+            st.session_state.pending_question = None
+            st.session_state.is_querying = False
+            st.session_state.suggestions_visible = True
+            st.session_state.next_suggestions = []
+            st.rerun()
         with st.chat_message("assistant"):
             status = st.status("Genie is investigating...", expanded=True)
 
@@ -281,6 +328,10 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
                 }
             )
             status.update(label="Genie investigation complete", state="complete", expanded=False)
+            st.session_state.next_suggestions = FOLLOW_UP_QUESTIONS.get(
+                pending_question, GENIE_QUESTIONS
+            )
+            st.session_state.suggestions_visible = True
         except Exception:
             st.session_state.chat_history.append(
                 {
@@ -293,6 +344,8 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
                 }
             )
             status.update(label="Genie is temporarily unavailable", state="error", expanded=True)
+            st.session_state.suggestions_visible = True
+            st.session_state.next_suggestions = []
         finally:
             st.session_state.pending_question = None
             st.session_state.is_querying = False
@@ -377,23 +430,30 @@ def render_reports_tab(
 
 def main() -> None:
     _init_session_state()
+    st.toggle("Light mode", key="light_mode")
+    st.caption(
+        "Light mode flips only the app's six skinned selectors "
+        "(metrics, dataframes, expander borders/headers, radio pills, and chat messages). "
+        "Native Streamlit chrome remains governed by config.toml base=\"dark\" and will not fully flip."
+    )
+    dark = {"metric_a": "#132238", "metric_b": "#0B1220", "surface": "#132238",
+            "text": "#E6EDF3", "border": "#14B8A6", "shadow": "#000000"}
+    light = {"metric_a": "#F8FAFC", "metric_b": "#E2E8F0", "surface": "#FFFFFF",
+             "text": "#172033", "border": "#0F766E", "shadow": "#64748B"}
+    palette = light if st.session_state.light_mode else dark
     st.markdown(
         """
         <style>
         [data-testid="stMetric"] {
-            background: linear-gradient(145deg, rgba(19, 34, 56, 0.96), rgba(11, 18, 32, 0.96));
-            border: 1px solid rgba(20, 184, 166, 0.28);
+            background: linear-gradient(145deg, __METRIC_A__, __METRIC_B__);
+            border: 1px solid __BORDER__; color: __TEXT__;
             border-radius: 0.75rem;
             padding: 0.9rem 1rem;
         }
         [data-testid="stDataFrame"], [data-testid="stExpander"], .stChatMessage {
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-            border: 1px solid rgba(230, 237, 243, 0.10);
+            box-shadow: 0 8px 24px __SHADOW__;
+            border: 1px solid __BORDER__; background: __SURFACE__; color: __TEXT__;
             border-radius: 0.75rem;
-        }
-        h2, h3 {
-            color: rgba(230, 237, 243, 0.82);
-            letter-spacing: 0.025em;
         }
         [data-testid="stRadio"] > label { display: none; }
         [data-testid="stRadio"] [role="radiogroup"] {
@@ -406,24 +466,57 @@ def main() -> None:
             pointer-events: none;
         }
         [data-testid="stRadio"] [role="radio"] + div {
-            border: 1px solid rgba(20, 184, 166, 0.24);
+            border: 1px solid __BORDER__;
             border-radius: 999px;
             padding: 0.45rem 0.9rem;
-            background: rgba(19, 34, 56, 0.72);
+            background: __SURFACE__; color: __TEXT__;
         }
         [data-testid="stRadio"] [role="radio"][aria-checked="true"] + div {
-            border-color: rgba(20, 184, 166, 0.9);
-            background: rgba(20, 184, 166, 0.20);
-            color: #E6EDF3;
+            border-color: __BORDER__; background: __METRIC_B__; color: __TEXT__;
         }
         .stChatMessage {
             padding: 0.25rem;
         }
+        @media (max-width: 768px) {
+            .st-key-kpi_strip [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            .st-key-kpi_strip [data-testid="column"] { flex: 1 1 160px; }
+            [data-testid="stVerticalBlock"]:has(.kpi-strip-floor-marker) > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            [data-testid="stVerticalBlock"]:has(.kpi-strip-floor-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"] { flex: 1 1 160px; }
+        }
         </style>
-        """,
+        """.replace("__METRIC_A__", palette["metric_a"])
+        .replace("__METRIC_B__", palette["metric_b"])
+        .replace("__SURFACE__", palette["surface"])
+        .replace("__TEXT__", palette["text"])
+        .replace("__BORDER__", palette["border"])
+        .replace("__SHADOW__", palette["shadow"]),
         unsafe_allow_html=True,
     )
     gold = _load_gold_tables()
+    case_rows = gold["case_summary"]
+    labels = {row.seed_account: row.scenario_label for row in case_rows.itertuples(index=False)}
+    flagged_by_account = gold["accounts"].set_index("account_id")["is_flagged_mule_network"]
+    account_option_ids = {ALL_ALERTS: None}
+    for account_id in case_rows["seed_account"].astype(str):
+        label = f"{labels[account_id]} — {account_id}"
+        if not bool(flagged_by_account.loc[account_id]) and not labels[
+            account_id
+        ].lower().endswith("(not flagged)"):
+            label += " (not flagged)"
+        account_option_ids[label] = account_id
+    st.session_state.account_option_ids = account_option_ids
+    options = list(account_option_ids)
+    if "account_selector" not in st.session_state:
+        st.session_state.account_selector = next(
+            (label for label, value in account_option_ids.items() if value == st.session_state.selected_account),
+            ALL_ALERTS,
+        )
+    st.selectbox(
+        "Investigation account",
+        options=options,
+        key="account_selector",
+        on_change=_select_account,
+    )
     selected_account = st.session_state.selected_account
     seed_account = selected_account or gold["_seed_account"]
     evidence_policy = st.session_state.evidence_policy
@@ -488,7 +581,7 @@ def main() -> None:
                     st.write("")
                     st.button("Reset to default policy", on_click=_reset_evidence_policy)
                 st.divider()
-                render_evidence_tab(gold, evidence_policy)
+                render_evidence_tab(gold, seed_account, evidence_policy)
                 with st.expander("Legitimate control cohort (audit)", expanded=False):
                     render_control_cohort_tab(gold)
 
@@ -505,6 +598,12 @@ def main() -> None:
                 render_reports_tab(gold, seed_account, evidence_policy, metrics)
 
     with genie_column:
+        st.toggle("🔌 Disable Genie -- Demonstrate Dependency", key="genie_disabled")
+        if st.session_state.genie_disabled:
+            st.caption(
+                "Genie is currently disabled for this demo -- questions will return "
+                "a static explanation instead of a live answer."
+            )
         st.subheader("🔎 Genie is on this case")
         render_genie_chat(gold, seed_account)
 

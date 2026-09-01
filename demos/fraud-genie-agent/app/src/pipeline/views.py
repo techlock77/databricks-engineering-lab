@@ -18,6 +18,15 @@ def filter_evidence(evidence_df: pd.DataFrame, evidence_policy: str) -> pd.DataF
     return evidence_df[in_scope].reset_index(drop=True)
 
 
+def case_evidence(gold: dict[str, pd.DataFrame], seed_account: str, evidence_policy: str) -> pd.DataFrame:
+    """Policy-scoped evidence touching the selected case network."""
+    net = compute_network(gold, seed_account, evidence_policy)
+    accounts = set(net.accounts_in_network)
+    evidence = filter_evidence(gold["evidence"], evidence_policy)
+    related = evidence["related_account_id"].isin(accounts)
+    return evidence[evidence["account_id"].isin(accounts) | related].reset_index(drop=True)
+
+
 def compute_network(
     gold: dict[str, pd.DataFrame], seed_account: str, evidence_policy: str
 ) -> network.NetworkResult:

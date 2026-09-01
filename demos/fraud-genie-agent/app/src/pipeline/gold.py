@@ -160,7 +160,9 @@ def build_gold_case_summary(
     net_strict: network.NetworkResult,
     accounts: pd.DataFrame,
 ) -> pd.DataFrame:
-    roles = accounts.set_index("account_id")["account_role"]
+    indexed = accounts.set_index("account_id")
+    roles = indexed["account_role"]
+    seed = indexed.loc[seed_account]
 
     def count_role(account_list: list[str], role: str) -> int:
         return sum(1 for a in account_list if roles.get(a) == role)
@@ -168,6 +170,8 @@ def build_gold_case_summary(
     row = {
         "case_id": f"CASE_{seed_account}",
         "seed_account": seed_account,
+        "scenario_type": seed["scenario_type"],
+        "scenario_label": seed["scenario_label"],
         "total_exposure_permissive": net_permissive.total_exposure,
         "total_exposure_strict": net_strict.total_exposure,
         "other_connected_accounts_permissive": net_permissive.other_connected_accounts_count,

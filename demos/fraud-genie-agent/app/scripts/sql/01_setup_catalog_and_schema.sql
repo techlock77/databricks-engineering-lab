@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     account_role STRING,
     open_date DATE,
     display_name STRING,
+    scenario_type STRING,
+    scenario_label STRING,
     tenure_days BIGINT,
     distinct_source_count BIGINT,
     total_inbound_amount DOUBLE,
@@ -92,6 +94,8 @@ CREATE TABLE IF NOT EXISTS transfers (
 CREATE TABLE IF NOT EXISTS case_summary (
     case_id STRING,
     seed_account STRING,
+    scenario_type STRING,
+    scenario_label STRING,
     total_exposure_permissive DOUBLE,
     total_exposure_strict DOUBLE,
     other_connected_accounts_permissive BIGINT,

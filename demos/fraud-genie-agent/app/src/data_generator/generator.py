@@ -1,366 +1,339 @@
-"""Deterministic synthetic data generator for MuleGraph Investigator.
+"""Generate deterministic, independently selectable MuleGraph cases.
 
-Produces four cohorts in one dataset, for a fixed seed:
-
-  (a) a mule network        -- real fan-in (5 sources -> 1 collector) AND
-                                fan-out (collector -> 3 distinct destinations,
-                                recurring across 3 months), plus one
-                                device-only "lookalike" account that shares a
-                                device with the collector but never
-                                transacts with it.
-  (b) a control cohort       -- a legitimate remittance hub with the SAME
-                                fan-in/fan-out shape and the SAME large
-                                per-transfer amounts, but long account tenure
-                                (900+ days) and an 8-month recurring corridor.
-  (c) account-takeover       -- a compromised-session-to-device record folded
-      provenance                in as evidence for one of the mule accounts.
-  (d) baseline noise         -- ordinary small, one-off transactions between
-                                unrelated accounts.
-
-Every entity, date, amount and ID is derived from a single seeded
-`random.Random` instance, so the same seed always produces byte-identical
-output. Reference date (deterministic "today" for tenure math) lives in
-policy.REFERENCE_DATE, never datetime.now().
+The curated dataset contains nine intentionally different investigation
+stories plus a small baseline-noise cohort. Every value is derived from a
+single ``random.Random`` instance and the fixed reference date in ``policy``,
+so a seed produces byte-identical tables on every run.
 """
 
 from __future__ import annotations
 
 import random
+import warnings
 from datetime import date, timedelta
 
 import pandas as pd
 
 from src.pipeline import policy
 
-# ---------------------------------------------------------------------------
-# Static IDs (kept explicit / non-randomized so downstream code and tests can
-# reference specific accounts by name).
-# ---------------------------------------------------------------------------
-
 MULE_COLLECTOR = "ACC_M_COLLECTOR"
-MULE_SOURCES = [f"ACC_M_SRC_{i}" for i in range(1, 6)]  # 5 fan-in sources
-MULE_DESTINATIONS = [f"ACC_M_DEST_{j}" for j in range(1, 4)]  # 3 fan-out destinations
 MULE_LOOKALIKE = "ACC_M_LOOKALIKE"
-
+MULE_SOURCES = [f"ACC_M_SRC_{i}" for i in range(1, 6)]
+MULE_DESTINATIONS = [f"ACC_M_DEST_{i}" for i in range(1, 4)]
 CONTROL_HUB = "ACC_C_HUB"
 CONTROL_SOURCES = [f"ACC_C_SRC_{i}" for i in range(1, 6)]
-CONTROL_DESTINATIONS = [f"ACC_C_DEST_{j}" for j in range(1, 4)]
-
-DEVICE_MULE_SHARED = "DEV_M_001"       # collector <-> fan-in sources (fund-flow corroborated)
-DEVICE_MULE_LOOKALIKE = "DEV_M_002"    # collector <-> lookalike (device-only)
-DEVICE_CONTROL_SHARED = "DEV_C_001"    # hub <-> control sources (fund-flow corroborated)
-
+CONTROL_DESTINATIONS = [f"ACC_C_DEST_{i}" for i in range(1, 4)]
+DEVICE_MULE_SHARED = "DEV_M_001"
+DEVICE_MULE_LOOKALIKE = "DEV_M_002"
+DEVICE_CONTROL_SHARED = "DEV_C_001"
 TAKEOVER_SESSION_ID = "SESS_M_001"
-
 BASELINE_ACCOUNT_COUNT = 20
-
 COHORT_MULE = "mule_network"
 COHORT_CONTROL = "control_remittance"
 COHORT_BASELINE = "baseline"
+SCENARIOS = (
+    ("simple_transfer", "Simple suspicious transfer", MULE_COLLECTOR),
+    ("rapid_pass_through", "Rapid pass-through money mule", "ACC_RAPID_COLLECTOR"),
+    ("victim_funnel", "Multiple victims funneling into one account", "ACC_FUNNEL_COLLECTOR"),
+    ("multi_hop", "Multi-hop fund movement", "ACC_CHAIN_COLLECTOR"),
+    ("shared_device_cluster", "Shared device/account relationships", "ACC_DEVICE_COLLECTOR"),
+    ("normal_control", "Normal account (not flagged)", CONTROL_HUB),
+    ("threshold_boundary", "Exact detection-threshold boundary", "ACC_BOUNDARY_COLLECTOR"),
+    ("insufficient_evidence", "Insufficient strict evidence", "ACC_THIN_COLLECTOR"),
+    ("large_network", "Larger connected mule network", "ACC_LARGE_COLLECTOR"),
+)
+SCENARIO_SEED_ACCOUNTS = [scenario[2] for scenario in SCENARIOS]
 
 
-def _mule_ids(case_index: int) -> tuple:
-    """Generate unique IDs for a mule network case. Case 0 uses the original
-    static IDs for backward compatibility with scale_factor=1."""
-    if case_index == 0:
-        return (
-            MULE_COLLECTOR,
-            MULE_SOURCES,
-            MULE_DESTINATIONS,
-            MULE_LOOKALIKE,
-            DEVICE_MULE_SHARED,
-            DEVICE_MULE_LOOKALIKE,
-            TAKEOVER_SESSION_ID,
+def _month_dates(rng: random.Random, start_year: int, start_month: int, count: int) -> list[date]:
+    """Monthly dates with seeded day jitter; no case is pinned to the 10th."""
+    dates = []
+    for offset in range(count):
+        absolute_month = start_year * 12 + start_month - 1 + offset
+        dates.append(
+            date(
+                absolute_month // 12,
+                absolute_month % 12 + 1,
+                rng.randint(1, 28),
+            )
         )
-    suffix = f"_{case_index:02d}"
-    collector = f"ACC_M{suffix}_COLLECTOR"
-    sources = [f"ACC_M{suffix}_SRC_{i}" for i in range(1, 6)]
-    destinations = [f"ACC_M{suffix}_DEST_{j}" for j in range(1, 4)]
-    lookalike = f"ACC_M{suffix}_LOOKALIKE"
-    dev_shared = f"DEV_M{suffix}_001"
-    dev_lookalike = f"DEV_M{suffix}_002"
-    session_id = f"SESS_M{suffix}_001"
-    return collector, sources, destinations, lookalike, dev_shared, dev_lookalike, session_id
+    return dates
 
 
-def _control_ids(case_index: int) -> tuple:
-    """Generate unique IDs for a control cohort case. Case 0 uses the original
-    static IDs for backward compatibility with scale_factor=1."""
-    if case_index == 0:
-        return CONTROL_HUB, CONTROL_SOURCES, CONTROL_DESTINATIONS, DEVICE_CONTROL_SHARED
-    suffix = f"_{case_index:02d}"
-    hub = f"ACC_C{suffix}_HUB"
-    sources = [f"ACC_C{suffix}_SRC_{i}" for i in range(1, 6)]
-    destinations = [f"ACC_C{suffix}_DEST_{j}" for j in range(1, 4)]
-    device = f"DEV_C{suffix}_001"
-    return hub, sources, destinations, device
-
-
-def _months(start_year: int, start_month: int, count: int) -> list[date]:
-    """Return `count` dates, one per month, on the 10th of each month."""
-    out = []
-    y, m = start_year, start_month
-    for _ in range(count):
-        out.append(date(y, m, 10))
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
-    return out
-
-
-def _jitter_amount(rng: random.Random, base: float, spread: float) -> float:
-    return round(base + rng.uniform(-spread, spread), 2)
-
-
-def generate_dataset(seed: int = policy.DEFAULT_SEED) -> dict[str, pd.DataFrame]:
-    """Generate the full synthetic bronze dataset for the given seed.
-
-    Returns a dict of DataFrames: accounts, devices, device_links, transfers,
-    sessions.
-    """
+def generate_dataset(
+    seed: int = policy.DEFAULT_SEED,
+) -> dict[str, pd.DataFrame]:
+    """Build the five Bronze tables for all curated investigation scenarios."""
     rng = random.Random(seed)
-
     accounts: list[dict] = []
     devices: list[dict] = []
     device_links: list[dict] = []
     transfers: list[dict] = []
     sessions: list[dict] = []
+    transaction_counter = 0
 
-    txn_counter = 0
-
-    def next_txn_id() -> str:
-        nonlocal txn_counter
-        txn_counter += 1
-        return f"TXN_{txn_counter:05d}"
-
-    # -----------------------------------------------------------------
-    # (a) Mule network
-    # -----------------------------------------------------------------
-    accounts.append(
-        {
-            "account_id": MULE_COLLECTOR,
-            "cohort": COHORT_MULE,
-            "account_role": "collector",
-            "open_date": date(2026, 4, 1),
-            "display_name": "Collector Account",
-        }
-    )
-    for src in MULE_SOURCES:
+    def add_account(
+        account_id: str,
+        role: str,
+        scenario_type: str,
+        scenario_label: str,
+        open_date: date = date(2026, 1, 1),
+        cohort: str = COHORT_MULE,
+    ) -> None:
         accounts.append(
-            {
-                "account_id": src,
-                "cohort": COHORT_MULE,
-                "account_role": "fan_in_source",
-                "open_date": date(2026, 1, 15) - timedelta(days=rng.randint(0, 120)),
-                "display_name": f"Source {src.split('_')[-1]}",
-            }
-        )
-    for dest in MULE_DESTINATIONS:
-        accounts.append(
-            {
-                "account_id": dest,
-                "cohort": COHORT_MULE,
-                "account_role": "fan_out_destination",
-                "open_date": date(2026, 2, 1) - timedelta(days=rng.randint(0, 90)),
-                "display_name": f"Destination {dest.split('_')[-1]}",
-            }
-        )
-    accounts.append(
-        {
-            "account_id": MULE_LOOKALIKE,
-            "cohort": COHORT_MULE,
-            "account_role": "device_only_lookalike",
-            "open_date": date(2026, 5, 1),
-            "display_name": "Device-Linked Lookalike",
-        }
-    )
-
-    mule_months = _months(2026, 3, 3)  # Mar, Apr, May 2026 -> 3 distinct months
-
-    # Fan-in: each of 5 sources sends to the collector every month.
-    for src in MULE_SOURCES:
-        for m in mule_months:
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": src,
-                    "dest_account": MULE_COLLECTOR,
-                    "amount": _jitter_amount(rng, 2500.0, 200.0),
-                    "txn_date": m,
-                    "channel": "ach",
-                }
+            dict(
+                account_id=account_id,
+                cohort=cohort,
+                account_role=role,
+                open_date=open_date,
+                display_name=account_id.replace("ACC_", "").replace("_", " ").title(),
+                scenario_type=scenario_type,
+                scenario_label=scenario_label,
             )
-
-    # Fan-out: collector sends to all 3 distinct destinations every month
-    # (recurring corridor, not a single repeated destination).
-    for dest in MULE_DESTINATIONS:
-        for m in mule_months:
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": MULE_COLLECTOR,
-                    "dest_account": dest,
-                    "amount": _jitter_amount(rng, 3000.0, 250.0),
-                    "txn_date": m,
-                    "channel": "wire",
-                }
-            )
-
-    # Shared device: collector <-> all 5 fan-in sources (fund-flow corroborated).
-    devices.append(
-        {"device_id": DEVICE_MULE_SHARED, "first_seen_date": date(2026, 2, 20)}
-    )
-    for src in MULE_SOURCES:
-        device_links.append(
-            {
-                "link_id": f"LINK_{DEVICE_MULE_SHARED}_{src}",
-                "device_id": DEVICE_MULE_SHARED,
-                "account_id": src,
-                "hub_account_id": MULE_COLLECTOR,
-                "linked_date": date(2026, 2, 25),
-            }
         )
 
-    # Shared device: collector <-> lookalike (device-only, no transfers at all).
-    devices.append(
-        {"device_id": DEVICE_MULE_LOOKALIKE, "first_seen_date": date(2026, 5, 2)}
-    )
-    device_links.append(
-        {
-            "link_id": f"LINK_{DEVICE_MULE_LOOKALIKE}_{MULE_LOOKALIKE}",
-            "device_id": DEVICE_MULE_LOOKALIKE,
-            "account_id": MULE_LOOKALIKE,
-            "hub_account_id": MULE_COLLECTOR,
-            "linked_date": date(2026, 5, 3),
-        }
-    )
+    def add_transfer(
+        source_account: str,
+        destination_account: str,
+        amount: float,
+        transaction_date: date,
+        channel: str = "ach",
+    ) -> None:
+        nonlocal transaction_counter
+        transaction_counter += 1
+        transfers.append(
+            dict(
+                txn_id=f"TXN_{transaction_counter:05d}",
+                source_account=source_account,
+                dest_account=destination_account,
+                amount=round(amount, 2),
+                txn_date=transaction_date,
+                channel=channel,
+            )
+        )
 
-    # (c) Account-takeover provenance: how DEVICE_MULE_SHARED first became
-    # linked to the network, via a compromised session on ACC_M_SRC_1.
+    def add_fan_case(
+        scenario_type: str,
+        scenario_label: str,
+        collector: str,
+        source_count: int = 4,
+        destination_count: int = 3,
+        month_count: int = 3,
+        inbound_amount: float = 1800,
+        outbound_amount: float = 2400,
+        account_prefix: str | None = None,
+        device_mode: str | None = "flow",
+        collector_open_date: date = date(2026, 1, 1),
+        cohort: str = COHORT_MULE,
+    ) -> tuple[list[str], list[str]]:
+        """Add a reusable fan-in/fan-out case with optional device evidence."""
+        account_prefix = account_prefix or collector.removesuffix("_COLLECTOR")
+        sources = [f"{account_prefix}_SRC_{i}" for i in range(1, source_count + 1)]
+        destinations = [f"{account_prefix}_DEST_{i}" for i in range(1, destination_count + 1)]
+        add_account(
+            collector,
+            "collector",
+            scenario_type,
+            scenario_label,
+            collector_open_date,
+            cohort,
+        )
+        for source in sources:
+            add_account(
+                source,
+                "fan_in_source",
+                scenario_type,
+                scenario_label,
+                date(2025, 1, 1),
+                cohort,
+            )
+        for destination in destinations:
+            add_account(
+                destination,
+                "fan_out_destination",
+                scenario_type,
+                scenario_label,
+                date(2025, 1, 1),
+                cohort,
+            )
+        transaction_dates = _month_dates(rng, 2026, 3, month_count)
+        for source in sources:
+            for transaction_date in transaction_dates:
+                add_transfer(
+                    source,
+                    collector,
+                    inbound_amount + rng.uniform(-50, 50),
+                    transaction_date,
+                )
+        for destination in destinations:
+            for transaction_date in transaction_dates:
+                add_transfer(
+                    collector,
+                    destination,
+                    outbound_amount + rng.uniform(-50, 50),
+                    transaction_date,
+                    "wire",
+                )
+        if device_mode:
+            device_id = f"DEV_{scenario_type.upper()}"
+            devices.append(dict(device_id=device_id, first_seen_date=date(2026, 2, 1)))
+            related_accounts = (
+                sources
+                if device_mode == "flow"
+                else [f"{account_prefix}_DEVICE_ONLY_{i}" for i in range(1, 6)]
+            )
+            for related_account in related_accounts:
+                if device_mode != "flow":
+                    add_account(
+                        related_account,
+                        "device_only_lookalike",
+                        scenario_type,
+                        scenario_label,
+                    )
+                device_links.append(
+                    dict(
+                        link_id=f"LINK_{device_id}_{related_account}",
+                        device_id=device_id,
+                        account_id=related_account,
+                        hub_account_id=collector,
+                        linked_date=date(2026, 2, 2),
+                    )
+                )
+        return sources, destinations
+
+    # 1. A compact, unambiguous collector case, augmented with takeover
+    # provenance and one device-only lookalike for policy comparison.
+    simple_sources, _ = add_fan_case(
+        *SCENARIOS[0][:2], MULE_COLLECTOR, source_count=5, account_prefix="ACC_M"
+    )
     sessions.append(
-        {
-            "session_id": TAKEOVER_SESSION_ID,
-            "device_id": DEVICE_MULE_SHARED,
-            "account_id": MULE_SOURCES[0],
-            "compromise_type": "credential_stuffing",
-            "session_date": date(2026, 2, 15),
-            "note": (
-                "Session flagged for credential-stuffing indicators; device "
-                f"{DEVICE_MULE_SHARED} was first linked to the network through "
-                "this compromised session, prior to any fund movement."
-            ),
-        }
+        dict(
+            session_id=TAKEOVER_SESSION_ID,
+            device_id="DEV_SIMPLE_TRANSFER",
+            account_id=simple_sources[0],
+            compromise_type="credential_stuffing",
+            session_date=date(2026, 2, 15),
+            note="Compromised session preceded fund movement.",
+        )
+    )
+    add_account(MULE_LOOKALIKE, "device_only_lookalike", *SCENARIOS[0][:2])
+    devices.append(dict(device_id=DEVICE_MULE_LOOKALIKE, first_seen_date=date(2026, 2, 1)))
+    device_links.append(
+        dict(
+            link_id="LINK_M_LOOKALIKE",
+            device_id=DEVICE_MULE_LOOKALIKE,
+            account_id=MULE_LOOKALIKE,
+            hub_account_id=MULE_COLLECTOR,
+            linked_date=date(2026, 2, 2),
+        )
+    )
+    # 2. Every monthly receipt arrives on days 1-4 and leaves on day 6, making
+    # rapid pass-through visible at the transaction-date level.
+    rapid_type, rapid_label, rapid_collector = SCENARIOS[1]
+    add_account(rapid_collector, "collector", rapid_type, rapid_label)
+    for source_number in range(1, 5):
+        source = f"ACC_RAPID_SRC_{source_number}"
+        add_account(source, "fan_in_source", rapid_type, rapid_label)
+        for month in (3, 4, 5):
+            add_transfer(source, rapid_collector, 1000, date(2026, month, source_number))
+    for destination_number in range(1, 4):
+        destination = f"ACC_RAPID_DEST_{destination_number}"
+        add_account(destination, "fan_out_destination", rapid_type, rapid_label)
+        for month in (3, 4, 5):
+            add_transfer(rapid_collector, destination, 2400, date(2026, month, 6), "wire")
+
+    # 3. Twelve distinct sources model many victims funneling into one account.
+    add_fan_case(*SCENARIOS[2][:2], SCENARIOS[2][2], source_count=12, inbound_amount=900)
+
+    # 4. Extend a qualifying collector topology through three intermediaries
+    # and a final destination to prove the graph is not hub-only.
+    _, chain_destinations = add_fan_case(*SCENARIOS[3][:2], SCENARIOS[3][2], device_mode=None)
+    previous_node = chain_destinations[0]
+    for hop_number in range(1, 4):
+        hop_account = f"ACC_CHAIN_HOP_{hop_number}"
+        add_account(hop_account, "intermediate", *SCENARIOS[3][:2])
+        add_transfer(
+            previous_node,
+            hop_account,
+            6000,
+            date(2026, 5, 20 + hop_number),
+            "wire",
+        )
+        previous_node = hop_account
+    final_destination = "ACC_CHAIN_FINAL"
+    add_account(final_destination, "final_destination", *SCENARIOS[3][:2])
+    add_transfer(previous_node, final_destination, 5800, date(2026, 5, 25), "wire")
+
+    # 5. Device-only lookalikes amplify the strict/permissive policy difference
+    # while the qualifying fund-flow core remains unchanged.
+    add_fan_case(*SCENARIOS[4][:2], SCENARIOS[4][2], device_mode="only")
+
+    # 6. A long-tenured, eight-month remittance corridor deliberately meets the
+    # raw shape but is protected by the legitimate-corridor override.
+    add_fan_case(
+        *SCENARIOS[5][:2],
+        CONTROL_HUB,
+        source_count=5,
+        month_count=8,
+        inbound_amount=1800,
+        outbound_amount=2500,
+        account_prefix="ACC_C",
+        collector_open_date=date(2022, 1, 1),
+        cohort=COHORT_CONTROL,
     )
 
-    # -----------------------------------------------------------------
-    # (b) Legitimate-remittance control cohort
-    # -----------------------------------------------------------------
-    accounts.append(
-        {
-            "account_id": CONTROL_HUB,
-            "cohort": COHORT_CONTROL,
-            "account_role": "hub",
-            "open_date": date(2022, 1, 1),
-            "display_name": "Remittance Hub",
-        }
+    # 7. Counts and total outbound flow sit exactly on every inclusive policy
+    # threshold, demonstrating deterministic boundary behavior.
+    boundary_type, boundary_label, boundary_collector = SCENARIOS[6]
+    add_account(boundary_collector, "collector", boundary_type, boundary_label)
+    for source_number in range(1, policy.FAN_IN_MIN_SOURCES + 1):
+        source = f"ACC_BOUNDARY_SRC_{source_number}"
+        add_account(source, "fan_in_source", boundary_type, boundary_label)
+        add_transfer(source, boundary_collector, 100, date(2026, 3, source_number))
+    for destination_number, amount in enumerate((6666.67, 6666.67, 6666.66), 1):
+        destination = f"ACC_BOUNDARY_DEST_{destination_number}"
+        add_account(destination, "fan_out_destination", boundary_type, boundary_label)
+        add_transfer(
+            boundary_collector,
+            destination,
+            amount,
+            date(2026, destination_number + 2, destination_number),
+            "wire",
+        )
+
+    # 8. Device relationships have no fund-flow corroboration, yielding an
+    # empty strict evidence view but visible permissive evidence.
+    add_fan_case(*SCENARIOS[7][:2], SCENARIOS[7][2], device_mode="only")
+
+    # 9. Eighteen sources and ten destinations provide a materially larger
+    # connected component for graph and Money Flow scaling demonstrations.
+    add_fan_case(
+        *SCENARIOS[8][:2],
+        SCENARIOS[8][2],
+        source_count=18,
+        destination_count=10,
+        inbound_amount=1200,
+        outbound_amount=2600,
     )
-    for src in CONTROL_SOURCES:
-        accounts.append(
-            {
-                "account_id": src,
-                "cohort": COHORT_CONTROL,
-                "account_role": "source",
-                "open_date": date(2021, 6, 1) - timedelta(days=rng.randint(0, 400)),
-                "display_name": f"Remittance Sender {src.split('_')[-1]}",
-            }
+
+    # Ordinary unrelated transfers provide a false-positive baseline.
+    baseline_accounts = [f"ACC_B_{i}" for i in range(1, BASELINE_ACCOUNT_COUNT + 1)]
+    for baseline_account in baseline_accounts:
+        add_account(
+            baseline_account,
+            "baseline",
+            "baseline_noise",
+            "Ordinary baseline account",
+            date(2023, 1, 1),
+            COHORT_BASELINE,
         )
-    for dest in CONTROL_DESTINATIONS:
-        accounts.append(
-            {
-                "account_id": dest,
-                "cohort": COHORT_CONTROL,
-                "account_role": "destination",
-                "open_date": date(2021, 3, 1) - timedelta(days=rng.randint(0, 400)),
-                "display_name": f"Remittance Corridor {dest.split('_')[-1]}",
-            }
+    for baseline_account in baseline_accounts:
+        add_transfer(
+            baseline_account,
+            rng.choice([account for account in baseline_accounts if account != baseline_account]),
+            rng.uniform(50, 350),
+            policy.REFERENCE_DATE - timedelta(days=rng.randint(1, 300)),
         )
-
-    control_months = _months(2025, 10, 8)  # Oct 2025 -> May 2026, 8 distinct months
-
-    for src in CONTROL_SOURCES:
-        for m in control_months:
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": src,
-                    "dest_account": CONTROL_HUB,
-                    "amount": _jitter_amount(rng, 2000.0, 150.0),
-                    "txn_date": m,
-                    "channel": "ach",
-                }
-            )
-    for dest in CONTROL_DESTINATIONS:
-        for m in control_months:
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": CONTROL_HUB,
-                    "dest_account": dest,
-                    "amount": _jitter_amount(rng, 2500.0, 200.0),
-                    "txn_date": m,
-                    "channel": "wire",
-                }
-            )
-
-    # Control cohort ALSO has device evidence corroborating its fan-in, on
-    # the same footing as the mule network -- the override must protect it
-    # despite full device+fund-flow corroboration, not because the evidence
-    # is weaker.
-    devices.append(
-        {"device_id": DEVICE_CONTROL_SHARED, "first_seen_date": date(2021, 5, 1)}
-    )
-    for src in CONTROL_SOURCES:
-        device_links.append(
-            {
-                "link_id": f"LINK_{DEVICE_CONTROL_SHARED}_{src}",
-                "device_id": DEVICE_CONTROL_SHARED,
-                "account_id": src,
-                "hub_account_id": CONTROL_HUB,
-                "linked_date": date(2021, 5, 5),
-            }
-        )
-
-    # -----------------------------------------------------------------
-    # (d) Baseline noise
-    # -----------------------------------------------------------------
-    baseline_ids = [f"ACC_B_{i}" for i in range(1, BASELINE_ACCOUNT_COUNT + 1)]
-    for bid in baseline_ids:
-        accounts.append(
-            {
-                "account_id": bid,
-                "cohort": COHORT_BASELINE,
-                "account_role": "baseline",
-                "open_date": date(2024, 1, 1) - timedelta(days=rng.randint(0, 1000)),
-                "display_name": f"Customer {bid.split('_')[-1]}",
-            }
-        )
-    for bid in baseline_ids:
-        n_txns = rng.randint(1, 3)
-        for _ in range(n_txns):
-            counterparty = rng.choice([b for b in baseline_ids if b != bid])
-            txn_day_offset = rng.randint(0, 360)
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": bid,
-                    "dest_account": counterparty,
-                    "amount": _jitter_amount(rng, 200.0, 150.0),
-                    "txn_date": policy.REFERENCE_DATE - timedelta(days=txn_day_offset),
-                    "channel": rng.choice(["ach", "wire", "card"]),
-                }
-            )
-
     return {
         "accounts": pd.DataFrame(accounts),
         "devices": pd.DataFrame(devices),
@@ -371,301 +344,21 @@ def generate_dataset(seed: int = policy.DEFAULT_SEED) -> dict[str, pd.DataFrame]
 
 
 def generate_dataset_scaled(
-    seed: int = policy.DEFAULT_SEED,
-    scale_factor: int = 1,
+    seed: int = policy.DEFAULT_SEED, scale_factor: int = 1
 ) -> dict[str, pd.DataFrame]:
-    """Generate scaled synthetic dataset with multiple independent cases.
+    """Return the curated dataset through the legacy scaling call signature.
 
-    At scale_factor=1 (default), produces exactly the same output as
-    generate_dataset(seed) -- byte-identical, all existing tests pass.
-
-    At scale_factor > 1, produces:
-      - `scale_factor` independent mule-network cases (distinct seeds,
-        distinct networks, distinct amounts/dates shifted in time)
-      - `scale_factor` independent control-cohort hub accounts
-      - A larger pool of baseline/noise accounts and transactions spanning
-        a wider date range
-
-    Parameters
-    ----------
-    seed : int
-        Base random seed for reproducibility.
-    scale_factor : int
-        Number of independent cases to generate. Must be >= 1.
-
-    Returns
-    -------
-    dict[str, pd.DataFrame]
-        Bronze tables: accounts, devices, device_links, transfers, sessions.
+    The curated nine-scenario dataset supersedes scale-factor-based repetition.
+    ``scale_factor`` is retained only for backward call compatibility; values
+    other than 1 do not alter the dataset and emit a visible warning.
     """
     if scale_factor < 1:
         raise ValueError("scale_factor must be >= 1")
-
-    if scale_factor == 1:
-        return generate_dataset(seed=seed)
-
-    rng = random.Random(seed)
-
-    accounts: list[dict] = []
-    devices: list[dict] = []
-    device_links: list[dict] = []
-    transfers: list[dict] = []
-    sessions: list[dict] = []
-
-    txn_counter = 0
-
-    def next_txn_id() -> str:
-        nonlocal txn_counter
-        txn_counter += 1
-        return f"TXN_{txn_counter:05d}"
-
-    for case_idx in range(scale_factor):
-        (
-            collector,
-            mule_sources,
-            mule_destinations,
-            lookalike,
-            dev_shared,
-            dev_lookalike,
-            session_id,
-        ) = _mule_ids(case_idx)
-
-        month_offset = case_idx * 2
-        year_add, month_start = divmod(2 + month_offset, 12)
-        if month_start == 0:
-            month_start = 12
-            year_add -= 1
-        mule_months = _months(2026 + year_add, month_start + 1, 3)
-
-        accounts.append(
-            {
-                "account_id": collector,
-                "cohort": COHORT_MULE,
-                "account_role": "collector",
-                "open_date": date(2026, 4, 1) + timedelta(days=case_idx * 30),
-                "display_name": f"Collector Account (Case {case_idx + 1})",
-            }
+    if scale_factor != 1:
+        warnings.warn(
+            "scale_factor is deprecated and no longer changes dataset size; "
+            "the curated nine-scenario dataset is always generated",
+            FutureWarning,
+            stacklevel=2,
         )
-        for src in mule_sources:
-            accounts.append(
-                {
-                    "account_id": src,
-                    "cohort": COHORT_MULE,
-                    "account_role": "fan_in_source",
-                    "open_date": date(2026, 1, 15) - timedelta(days=rng.randint(0, 120)),
-                    "display_name": f"Source {src.split('_')[-1]}",
-                }
-            )
-        for dest in mule_destinations:
-            accounts.append(
-                {
-                    "account_id": dest,
-                    "cohort": COHORT_MULE,
-                    "account_role": "fan_out_destination",
-                    "open_date": date(2026, 2, 1) - timedelta(days=rng.randint(0, 90)),
-                    "display_name": f"Destination {dest.split('_')[-1]}",
-                }
-            )
-        accounts.append(
-            {
-                "account_id": lookalike,
-                "cohort": COHORT_MULE,
-                "account_role": "device_only_lookalike",
-                "open_date": date(2026, 5, 1) + timedelta(days=case_idx * 15),
-                "display_name": f"Device-Linked Lookalike (Case {case_idx + 1})",
-            }
-        )
-
-        base_fan_in_amount = 2500.0 + case_idx * 500
-        for src in mule_sources:
-            for m in mule_months:
-                transfers.append(
-                    {
-                        "txn_id": next_txn_id(),
-                        "source_account": src,
-                        "dest_account": collector,
-                        "amount": _jitter_amount(rng, base_fan_in_amount, 200.0),
-                        "txn_date": m,
-                        "channel": "ach",
-                    }
-                )
-
-        base_fan_out_amount = 3000.0 + case_idx * 600
-        for dest in mule_destinations:
-            for m in mule_months:
-                transfers.append(
-                    {
-                        "txn_id": next_txn_id(),
-                        "source_account": collector,
-                        "dest_account": dest,
-                        "amount": _jitter_amount(rng, base_fan_out_amount, 250.0),
-                        "txn_date": m,
-                        "channel": "wire",
-                    }
-                )
-
-        devices.append(
-            {
-                "device_id": dev_shared,
-                "first_seen_date": date(2026, 2, 20) + timedelta(days=case_idx * 7),
-            }
-        )
-        for src in mule_sources:
-            device_links.append(
-                {
-                    "link_id": f"LINK_{dev_shared}_{src}",
-                    "device_id": dev_shared,
-                    "account_id": src,
-                    "hub_account_id": collector,
-                    "linked_date": date(2026, 2, 25) + timedelta(days=case_idx * 7),
-                }
-            )
-
-        devices.append(
-            {
-                "device_id": dev_lookalike,
-                "first_seen_date": date(2026, 5, 2) + timedelta(days=case_idx * 10),
-            }
-        )
-        device_links.append(
-            {
-                "link_id": f"LINK_{dev_lookalike}_{lookalike}",
-                "device_id": dev_lookalike,
-                "account_id": lookalike,
-                "hub_account_id": collector,
-                "linked_date": date(2026, 5, 3) + timedelta(days=case_idx * 10),
-            }
-        )
-
-        sessions.append(
-            {
-                "session_id": session_id,
-                "device_id": dev_shared,
-                "account_id": mule_sources[0],
-                "compromise_type": "credential_stuffing",
-                "session_date": date(2026, 2, 15) + timedelta(days=case_idx * 5),
-                "note": (
-                    f"Session flagged for credential-stuffing indicators; device "
-                    f"{dev_shared} was first linked to the network through "
-                    "this compromised session, prior to any fund movement."
-                ),
-            }
-        )
-
-    for case_idx in range(scale_factor):
-        hub, ctrl_sources, ctrl_destinations, ctrl_device = _control_ids(case_idx)
-
-        ctrl_start_month = 10 - case_idx
-        if ctrl_start_month < 1:
-            ctrl_start_month += 12
-        ctrl_months = _months(2025 if ctrl_start_month >= 7 else 2025, ctrl_start_month, 8)
-
-        accounts.append(
-            {
-                "account_id": hub,
-                "cohort": COHORT_CONTROL,
-                "account_role": "hub",
-                "open_date": date(2022, 1, 1) - timedelta(days=case_idx * 90),
-                "display_name": f"Remittance Hub {case_idx + 1}",
-            }
-        )
-        for src in ctrl_sources:
-            accounts.append(
-                {
-                    "account_id": src,
-                    "cohort": COHORT_CONTROL,
-                    "account_role": "source",
-                    "open_date": date(2021, 6, 1) - timedelta(days=rng.randint(0, 400)),
-                    "display_name": f"Remittance Sender {src.split('_')[-1]}",
-                }
-            )
-        for dest in ctrl_destinations:
-            accounts.append(
-                {
-                    "account_id": dest,
-                    "cohort": COHORT_CONTROL,
-                    "account_role": "destination",
-                    "open_date": date(2021, 3, 1) - timedelta(days=rng.randint(0, 400)),
-                    "display_name": f"Remittance Corridor {dest.split('_')[-1]}",
-                }
-            )
-
-        for src in ctrl_sources:
-            for m in ctrl_months:
-                transfers.append(
-                    {
-                        "txn_id": next_txn_id(),
-                        "source_account": src,
-                        "dest_account": hub,
-                        "amount": _jitter_amount(rng, 2000.0, 150.0),
-                        "txn_date": m,
-                        "channel": "ach",
-                    }
-                )
-        for dest in ctrl_destinations:
-            for m in ctrl_months:
-                transfers.append(
-                    {
-                        "txn_id": next_txn_id(),
-                        "source_account": hub,
-                        "dest_account": dest,
-                        "amount": _jitter_amount(rng, 2500.0, 200.0),
-                        "txn_date": m,
-                        "channel": "wire",
-                    }
-                )
-
-        devices.append(
-            {
-                "device_id": ctrl_device,
-                "first_seen_date": date(2021, 5, 1) - timedelta(days=case_idx * 60),
-            }
-        )
-        for src in ctrl_sources:
-            device_links.append(
-                {
-                    "link_id": f"LINK_{ctrl_device}_{src}",
-                    "device_id": ctrl_device,
-                    "account_id": src,
-                    "hub_account_id": hub,
-                    "linked_date": date(2021, 5, 5) - timedelta(days=case_idx * 60),
-                }
-            )
-
-    scaled_baseline_count = BASELINE_ACCOUNT_COUNT * scale_factor
-    baseline_ids = [f"ACC_B_{i}" for i in range(1, scaled_baseline_count + 1)]
-    date_range_days = 360 + (scale_factor - 1) * 180
-
-    for bid in baseline_ids:
-        accounts.append(
-            {
-                "account_id": bid,
-                "cohort": COHORT_BASELINE,
-                "account_role": "baseline",
-                "open_date": date(2024, 1, 1) - timedelta(days=rng.randint(0, 1000)),
-                "display_name": f"Customer {bid.split('_')[-1]}",
-            }
-        )
-    for bid in baseline_ids:
-        n_txns = rng.randint(1, 3)
-        for _ in range(n_txns):
-            counterparty = rng.choice([b for b in baseline_ids if b != bid])
-            txn_day_offset = rng.randint(0, date_range_days)
-            transfers.append(
-                {
-                    "txn_id": next_txn_id(),
-                    "source_account": bid,
-                    "dest_account": counterparty,
-                    "amount": _jitter_amount(rng, 200.0, 150.0),
-                    "txn_date": policy.REFERENCE_DATE - timedelta(days=txn_day_offset),
-                    "channel": rng.choice(["ach", "wire", "card"]),
-                }
-            )
-
-    return {
-        "accounts": pd.DataFrame(accounts),
-        "devices": pd.DataFrame(devices),
-        "device_links": pd.DataFrame(device_links),
-        "transfers": pd.DataFrame(transfers),
-        "sessions": pd.DataFrame(sessions),
-    }
+    return generate_dataset(seed)

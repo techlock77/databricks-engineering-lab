@@ -90,7 +90,7 @@ this run)*:
 |---|---:|---:|
 | Other connected accounts | 9 | 8 |
 | Shared devices | 2 | 1 |
-| Total exposure | $63,637.69 | $63,637.69 |
+| Total exposure | $48,465.78 | $48,465.78 |
 | Potential victims | 5 | 5 |
 | External destinations | 3 | 3 |
 

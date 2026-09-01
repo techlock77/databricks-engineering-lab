@@ -76,12 +76,12 @@ the same facts, visually:
 |---|---:|
 | Other connected accounts | **9** |
 | Shared devices | **2** |
-| Linked exposure | **$63,637.69** |
+| Linked exposure | **$48,465.78** |
 | Potential victims | **5** |
 | External destinations | **3** |
 
 *(Layman)* One flagged account turns out to be the center of a nine-account
-network, tied together by two shared devices and over $63,000 in linked
+network, tied together by two shared devices and over $48,000 in linked
 transfers.
 
 ## 5. Reveal the Pattern — the cohort-redefinition moment (40s)
@@ -98,7 +98,7 @@ Accounts tab all update together:
 |---|---:|---:|
 | Other connected accounts | 9 | **8** |
 | Shared devices | 2 | **1** |
-| Linked exposure | $63,637.69 | **$63,637.69** |
+| Linked exposure | $48,465.78 | **$48,465.78** |
 
 *(Layman)* Tightening the evidence standard drops one weakly-linked account
 and one weak device connection — but notice the dollar exposure **doesn't
@@ -135,7 +135,7 @@ Ask Genie, live, as the final beat:
 
 Let Genie answer from the real network data. Land the point yourself if
 needed: a single-transaction review would never have surfaced the shared
-devices, the other 8 connected accounts, or the $63,637.69 in linked exposure
+devices, the other 8 connected accounts, or the $48,465.78 in linked exposure
 — that only comes from tracing the network, which is exactly what this app
 does in one conversation.
 
