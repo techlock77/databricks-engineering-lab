@@ -35,13 +35,18 @@ assert "default" not in inspect.signature(streamlit.tabs).parameters
 assert "key" not in inspect.signature(streamlit.tabs).parameters
 assert "disabled" in inspect.signature(streamlit.chat_input).parameters
 assert callable(streamlit.status)
+assert callable(streamlit.cache_resource.clear)
 assert "hide_index" in inspect.signature(streamlit.dataframe).parameters
 assert "use_container_width" in inspect.signature(streamlit.dataframe).parameters
 assert "disabled" in inspect.signature(streamlit.button).parameters
 assert "key" in inspect.signature(streamlit.toggle).parameters
 assert "disabled" in inspect.signature(streamlit.toggle).parameters
+assert "help" in inspect.signature(streamlit.toggle).parameters
+assert "label_visibility" in inspect.signature(streamlit.toggle).parameters
 assert "key" in inspect.signature(streamlit.selectbox).parameters
 assert "on_change" in inspect.signature(streamlit.selectbox).parameters
+assert "index" in inspect.signature(streamlit.selectbox).parameters
+assert "placeholder" in inspect.signature(streamlit.selectbox).parameters
 assert "page_icon" in inspect.signature(streamlit.set_page_config).parameters
 assert "horizontal" in inspect.signature(streamlit.radio).parameters
 assert "options" in inspect.signature(streamlit.radio).parameters
