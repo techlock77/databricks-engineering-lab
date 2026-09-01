@@ -91,6 +91,26 @@ def test_app_uses_cross_version_dataframe_width_api():
     )
 
 
+def test_page_config_sets_investigation_icon():
+    tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
+    page_config_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "set_page_config"
+    ]
+
+    assert len(page_config_calls) == 1
+    page_icon = next(
+        keyword.value
+        for keyword in page_config_calls[0].keywords
+        if keyword.arg == "page_icon"
+    )
+    assert isinstance(page_icon, ast.Constant)
+    assert page_icon.value == "🔎"
+
+
 def test_evidence_tab_and_other_dataframes_render_with_real_streamlit():
     app = AppTest.from_string(_app_script()).run(timeout=10)
 
@@ -116,6 +136,9 @@ def test_new_tab_structure_kpis_and_documented_genie_questions_render_once():
         "Shared devices",
         "External destinations",
     ]
+    risk_metric = app.metric[0]
+    assert risk_metric.value == "HIGH"
+    assert risk_metric.delta == "Flagged for review"
     suggested_buttons = [
         app.button(key=f"genie_suggestion_{index}").label
         for index in range(len(_documented_questions()))

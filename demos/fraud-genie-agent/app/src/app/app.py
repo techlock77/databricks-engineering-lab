@@ -48,7 +48,7 @@ from src.genie.interface import GenieContext, genie_query
 from src.data_access import load_gold_tables
 from src.pipeline import policy, views
 
-st.set_page_config(page_title="MuleGraph Investigator", layout="wide")
+st.set_page_config(page_title="MuleGraph Investigator", page_icon="🔎", layout="wide")
 
 
 GENIE_QUESTIONS = [
@@ -132,9 +132,14 @@ def render_evidence_tab(gold: dict, evidence_policy: str) -> None:
 def render_kpi_strip(gold: dict, seed_account: str, metrics: dict) -> None:
     account = gold["accounts"][gold["accounts"]["account_id"] == seed_account].iloc[0]
     flagged = bool(account["is_flagged_mule_network"])
-    risk_value = f"{account['risk_band']} — {'Flagged' if flagged else 'Not flagged'}"
     columns = st.columns(6)
-    columns[0].metric("Risk band", risk_value)
+    columns[0].metric(
+        "Risk band",
+        str(account["risk_band"]).upper(),
+        delta="Flagged for review" if flagged else "Not flagged",
+        delta_color="red" if flagged else "green",
+        delta_arrow="off",
+    )
     columns[1].metric("Linked exposure", f"${metrics['total_exposure']:,.2f}")
     columns[2].metric("Connected accounts", metrics["other_connected_accounts_count"])
     columns[3].metric("Potential victims", metrics["potential_victims_count"])
