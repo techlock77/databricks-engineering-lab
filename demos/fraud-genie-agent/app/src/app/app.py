@@ -279,6 +279,9 @@ def _render_chat_history() -> None:
                         )
             if turn.get("freshness"):
                 st.caption(turn["freshness"])
+            if turn.get("error_detail"):
+                with st.expander("Technical details", expanded=False):
+                    st.write(turn["error_detail"])
 
 
 def render_genie_chat(gold: dict, seed_account: str) -> None:
@@ -332,7 +335,9 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
                 pending_question, GENIE_QUESTIONS
             )
             st.session_state.suggestions_visible = True
-        except Exception:
+        except Exception as exc:
+            error_detail = f"{type(exc).__name__}: {exc}"
+            print(f"Genie query failed: {exc!r}", file=sys.stderr)
             st.session_state.chat_history.append(
                 {
                     "role": "assistant",
@@ -341,6 +346,7 @@ def render_genie_chat(gold: dict, seed_account: str) -> None:
                         "investigation with the KPI strip, Investigation evidence, and "
                         "Network connected accounts while the service recovers."
                     ),
+                    "error_detail": error_detail,
                 }
             )
             status.update(label="Genie is temporarily unavailable", state="error", expanded=True)

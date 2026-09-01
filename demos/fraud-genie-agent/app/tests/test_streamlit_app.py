@@ -23,7 +23,10 @@ genie = patch("src.genie.interface.genie_query", side_effect=test_genie_query)
 """
     elif genie_effect == "error":
         genie_patch = """
-genie = patch("src.genie.interface.genie_query", side_effect=RuntimeError("Genie unavailable"))
+genie = patch(
+    "src.genie.interface.genie_query",
+    side_effect=RuntimeError("Genie Space schema out of sync"),
+)
 """
     elif genie_effect == "success":
         genie_patch = """
@@ -246,7 +249,15 @@ def test_genie_error_becomes_assistant_message_instead_of_crashing():
     assert not app.exception
     rendered_text = [item.value for item in app.markdown]
     assert f"**Question:** {_documented_questions()[0]}" in rendered_text
-    assert any("Genie could not complete this question" in text for text in rendered_text)
+    expected_fallback = (
+        "Genie could not complete this question. You can continue the "
+        "investigation with the KPI strip, Investigation evidence, and "
+        "Network connected accounts while the service recovers."
+    )
+    assert expected_fallback in rendered_text
+    details = next(expander for expander in app.expander if expander.label == "Technical details")
+    assert not details.proto.expanded
+    assert "RuntimeError: Genie Space schema out of sync" in rendered_text
     assert not app.session_state["is_querying"]
 
 
