@@ -261,6 +261,10 @@ def test_landing_hero_is_live_computed_and_disappears_after_opening_case():
 def test_home_is_default_and_workspace_navigation_is_cleanly_gated():
     app = AppTest.from_string(_app_script()).run(timeout=10)
     assert app.session_state["top_level_view"] == "home"
+    assert any(item.value == '<span class="nav-active-home"></span>' for item in app.markdown)
+    assert not any(
+        item.value == '<span class="nav-active-workspace"></span>' for item in app.markdown
+    )
     assert any("Find the network before the money moves" in item.value for item in app.markdown)
     assert any(button.key and button.key.startswith("scenario_chip_") for button in app.button)
     assert not app.radio
@@ -269,6 +273,10 @@ def test_home_is_default_and_workspace_navigation_is_cleanly_gated():
     assert not any("Genie is on this case" in item.value for item in app.subheader)
 
     _open_workspace(app)
+    assert not any(item.value == '<span class="nav-active-home"></span>' for item in app.markdown)
+    assert any(
+        item.value == '<span class="nav-active-workspace"></span>' for item in app.markdown
+    )
     assert any("Alert Queue" in item.value for item in app.subheader)
     assert not any("Find the network before the money moves" in item.value for item in app.markdown)
 
@@ -543,7 +551,10 @@ def test_theme_toggle_changes_literal_palette_and_documents_limitation():
     assert "#F8FAFC" in light_css and "#172033" in light_css
     assert dark_css != light_css
     assert any("Native Streamlit chrome" in caption.value for caption in app.caption)
-    assert any("including the nav bar" in caption.value for caption in app.caption)
+    assert any(
+        "skinned regions -- nav bar, metrics, dataframes" in caption.value
+        for caption in app.caption
+    )
 
 
 def test_nav_css_uses_palette_tokens_and_has_mobile_reflow():
@@ -555,6 +566,12 @@ def test_nav_css_uses_palette_tokens_and_has_mobile_reflow():
     assert {"__TEXT__", "__BORDER__", "__SURFACE__", "__SHADOW__"} <= set(
         re.findall(r"__[A-Z_]+__", nav_css)
     )
+    assert '<span class="nav-active-home"></span>' in source
+    assert '<span class="nav-active-workspace"></span>' in source
+    assert '[data-testid="stColumn"]:has(.nav-active-home) button' in nav_css
+    assert '[data-testid="stColumn"]:has(.nav-active-workspace) button' in nav_css
+    assert "background: __SURFACE__; color: __TEXT__;" in nav_css
+    assert "background: __BORDER__; color: __TEXT__;" in nav_css
     assert ".top-nav-floor-marker" in source
     assert "flex: 1 1 240px" in source
 

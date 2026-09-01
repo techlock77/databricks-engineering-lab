@@ -572,8 +572,14 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         home, workspace = destinations.columns(2)
+        if st.session_state.top_level_view == "home":
+            home.markdown('<span class="nav-active-home"></span>', unsafe_allow_html=True)
         home.button("Home", key="nav_home", on_click=_select_top_level_view,
                     args=("home",), use_container_width=True)
+        if st.session_state.top_level_view == "workspace":
+            workspace.markdown(
+                '<span class="nav-active-workspace"></span>', unsafe_allow_html=True
+            )
         workspace.button("Investigation Workspace", key="nav_workspace",
                          on_click=_select_top_level_view, args=("workspace",),
                          use_container_width=True)
@@ -583,8 +589,8 @@ def main() -> None:
         )
     st.toggle("Light mode", key="light_mode")
     st.caption(
-        "Light mode flips only the app's skinned regions, including the nav bar "
-        "(metrics, dataframes, expander borders/headers, radio pills, and chat messages). "
+        "Light mode flips only the app's skinned regions -- nav bar, metrics, dataframes, "
+        "expander borders/headers, radio pills, and chat messages. "
         "Native Streamlit chrome remains governed by config.toml base=\"dark\" and will not fully flip."
     )
     dark = {"metric_a": "#132238", "metric_b": "#0B1220", "surface": "#132238",
@@ -646,6 +652,15 @@ def main() -> None:
         .top-nav-badge { display: inline-block; border: 1px solid __BORDER__;
             border-radius: 999px; padding: 0.45rem 0.8rem; background: __SURFACE__;
             color: __TEXT__; box-shadow: 0 8px 24px __SHADOW__; opacity: 0.78; }
+        .st-key-top_nav button,
+        [data-testid="stVerticalBlock"]:has(.top-nav-floor-marker) button {
+            border: 1px solid __BORDER__; border-radius: 999px;
+            padding: 0.45rem 0.9rem; background: __SURFACE__; color: __TEXT__;
+        }
+        [data-testid="stColumn"]:has(.nav-active-home) button,
+        [data-testid="stColumn"]:has(.nav-active-workspace) button {
+            background: __BORDER__; color: __TEXT__; box-shadow: 0 8px 24px __SHADOW__;
+        }
         [data-testid="stColumn"]:has(.hero-link-button-marker) button {
             border: 1px solid __BORDER__; border-radius: 0.5rem;
             color: __TEXT__; background: transparent;
