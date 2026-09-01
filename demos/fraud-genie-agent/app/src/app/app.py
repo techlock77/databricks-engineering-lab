@@ -646,17 +646,31 @@ def main() -> None:
         .hero-subheadline { color: __TEXT__; opacity: 0.72; font-size: 1.05rem;
             margin: 1rem 0 0.65rem; max-width: 44rem; }
         .hero-stat { color: __TEXT__; opacity: 0.78; font-size: 0.85rem; }
-        .top-nav-brand { color: __TEXT__; font-weight: 700; }
+        .st-key-top_nav [data-testid="stHorizontalBlock"]:has(.top-nav-brand),
+        [data-testid="stVerticalBlock"]:has(.top-nav-floor-marker) > [data-testid="stHorizontalBlock"] {
+            align-items: center; gap: 1rem;
+        }
+        .top-nav-brand { color: __TEXT__; font-size: 1.35rem; font-weight: 800;
+            line-height: 1.2; }
         .top-nav-brand span { display: block; color: __TEXT__; opacity: 0.72;
             font-size: 0.8rem; font-weight: 400; }
-        .top-nav-badge { display: inline-block; border: 1px solid __BORDER__;
+        .top-nav-badge { display: block; width: fit-content; margin-left: auto;
+            border: 1px solid __BORDER__;
             border-radius: 999px; padding: 0.45rem 0.8rem; background: __SURFACE__;
             color: __TEXT__; box-shadow: 0 8px 24px __SHADOW__; opacity: 0.78; }
         .st-key-top_nav button,
         [data-testid="stVerticalBlock"]:has(.top-nav-floor-marker) button {
             border: 1px solid __BORDER__; border-radius: 999px;
-            padding: 0.45rem 0.9rem; background: __SURFACE__; color: __TEXT__;
+            height: 2.75rem; min-height: 2.75rem; padding: 0.45rem 0.9rem;
+            display: flex; align-items: center; justify-content: center;
+            background: __SURFACE__; color: __TEXT__;
         }
+        .stElementContainer:has(.nav-active-home),
+        .stElementContainer:has(.nav-active-workspace),
+        .element-container:has(.nav-active-home),
+        .element-container:has(.nav-active-workspace),
+        [data-testid="stMarkdownContainer"]:has(.nav-active-home),
+        [data-testid="stMarkdownContainer"]:has(.nav-active-workspace) { display: none; }
         [data-testid="stColumn"]:has(.nav-active-home) button,
         [data-testid="stColumn"]:has(.nav-active-workspace) button {
             background: __BORDER__; color: __TEXT__; box-shadow: 0 8px 24px __SHADOW__;

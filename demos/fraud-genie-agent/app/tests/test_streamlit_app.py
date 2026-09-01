@@ -572,6 +572,15 @@ def test_nav_css_uses_palette_tokens_and_has_mobile_reflow():
     assert '[data-testid="stColumn"]:has(.nav-active-workspace) button' in nav_css
     assert "background: __SURFACE__; color: __TEXT__;" in nav_css
     assert "background: __BORDER__; color: __TEXT__;" in nav_css
+    assert "align-items: center; gap: 1rem;" in nav_css
+    assert "height: 2.75rem; min-height: 2.75rem" in nav_css
+    assert "display: flex; align-items: center; justify-content: center;" in nav_css
+    assert ".stElementContainer:has(.nav-active-home)" in nav_css
+    assert ".stElementContainer:has(.nav-active-workspace)" in nav_css
+    assert "width: fit-content; margin-left: auto;" in nav_css
+    brand_size = re.search(r"\.top-nav-brand \{[^}]*font-size: ([0-9.]+)rem", nav_css)
+    assert brand_size and float(brand_size.group(1)) >= 1.25
+    assert "font-weight: 800" in nav_css
     assert ".top-nav-floor-marker" in source
     assert "flex: 1 1 240px" in source
 
