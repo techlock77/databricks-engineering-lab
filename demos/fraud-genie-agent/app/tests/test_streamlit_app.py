@@ -50,7 +50,12 @@ genie = patch(
     else:
         genie_patch = "genie = patch(\"src.genie.interface.genie_query\")"
 
-    context_patch = "context = patch(\"src.genie.interface.GenieContext\", side_effect=AssertionError(\"GenieContext constructed\"))" if genie_effect == "disabled" else "context = patch(\"src.genie.interface.GenieContext\")"
+    context_patch = "context = patch(\"src.genie.interface.GenieContext\", side_effect=AssertionError(\"GenieContext constructed\"))" if genie_effect == "disabled" else """
+def capture_context(**kwargs):
+    st.session_state.context_seed_account = kwargs["seed_account"]
+    return object()
+context = patch("src.genie.interface.GenieContext", side_effect=capture_context)
+"""
     if genie_effect == "disabled":
         genie_patch = "genie = patch(\"src.genie.interface.genie_query\", side_effect=AssertionError(\"genie_query called\"))"
     return f"""
@@ -233,7 +238,6 @@ def test_landing_hero_is_live_computed_and_disappears_after_opening_case():
     )
     assert any("Find the network before the money moves" in value for value in rendered)
     assert any(expected_stat in value for value in rendered)
-    assert any('href="#ask-genie"' in value for value in rendered)
     assert any('id="ask-genie"' in value for value in rendered)
 
     app.button(key="open_highest_priority_case").click().run(timeout=10)
@@ -242,13 +246,45 @@ def test_landing_hero_is_live_computed_and_disappears_after_opening_case():
     )
 
 
-def test_both_hero_actions_open_the_same_top_priority_queue_account():
+def test_all_hero_actions_open_the_same_top_priority_queue_account():
     gold = run_pipeline(seed=42).gold
     expected = _priority_accounts(gold)[0]
-    for key in ("open_highest_priority_case", "open_featured_case"):
+    for key in (
+        "open_highest_priority_case",
+        "ask_genie_top_case",
+        "open_featured_case",
+    ):
         app = AppTest.from_string(_app_script()).run(timeout=10)
         app.button(key=key).click().run(timeout=10)
         assert app.session_state["selected_account"] == expected
+        assert any(f"Case: {expected}" in header.value for header in app.subheader)
+        assert [metric.label for metric in app.metric] == [
+            "Risk band",
+            "Linked exposure",
+            "Connected accounts",
+            "Potential victims",
+            "Shared devices",
+            "External destinations",
+        ]
+        assert any("Genie is on this case" in header.value for header in app.subheader)
+
+    genie_app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    genie_app.button(key="ask_genie_top_case").click().run(timeout=10)
+    genie_app.button(key="genie_suggestion_0").click().run(timeout=10)
+    assert genie_app.session_state["context_seed_account"] == expected
+
+
+def test_scenario_chips_use_one_palette_accent_without_rainbow_semantics():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    scenario_css = css.split('.st-key-scenario_row', 1)[1].split('@media', 1)[0]
+    assert "nth-child" not in scenario_css
+    assert "border: 2px solid #14B8A6" in scenario_css
+    for rainbow_color in (
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+        "#3b82f6", "#8b5cf6", "#ec4899",
+    ):
+        assert rainbow_color not in scenario_css
 
 
 def test_scenario_chips_render_all_labels_and_open_corresponding_cases():

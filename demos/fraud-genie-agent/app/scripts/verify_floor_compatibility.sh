@@ -54,18 +54,6 @@ assert "use_container_width" in inspect.signature(streamlit.bar_chart).parameter
 assert list(inspect.signature(streamlit.divider).parameters) == []
 assert list(inspect.signature(streamlit.expander).parameters) == ["label", "expanded"]
 
-anchor_app = AppTest.from_string(
-    """
-import streamlit as st
-st.markdown('<a href="#ask-genie">Ask Genie a question</a>', unsafe_allow_html=True)
-st.markdown('<span id="ask-genie"></span>', unsafe_allow_html=True)
-"""
-).run()
-assert not anchor_app.exception
-anchor_markup = [item.value for item in anchor_app.markdown]
-assert '<a href="#ask-genie">Ask Genie a question</a>' in anchor_markup
-assert '<span id="ask-genie"></span>' in anchor_markup
-
 status_app = AppTest.from_string(
     """
 import inspect

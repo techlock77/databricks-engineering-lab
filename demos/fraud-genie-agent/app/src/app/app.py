@@ -418,8 +418,15 @@ def render_landing_hero(gold: dict, flagged) -> None:
                 use_container_width=True,
             )
             secondary.markdown(
-                '<a class="hero-link" href="#ask-genie">Ask Genie a question</a>',
+                '<span class="hero-link-button-marker"></span>',
                 unsafe_allow_html=True,
+            )
+            secondary.button(
+                "Ask Genie a question →",
+                key="ask_genie_top_case",
+                on_click=_open_case,
+                args=(top_account,),
+                use_container_width=True,
             )
         with featured:
             with st.container(border=True):
@@ -609,35 +616,18 @@ def main() -> None:
         .hero-subheadline { color: __TEXT__; opacity: 0.72; font-size: 1.05rem;
             margin: 1rem 0 0.65rem; max-width: 44rem; }
         .hero-stat { color: __TEXT__; opacity: 0.78; font-size: 0.85rem; }
-        .hero-link { display: block; border: 1px solid __BORDER__; border-radius: 0.5rem;
-            color: __TEXT__ !important; padding: 0.45rem 0.75rem; text-align: center;
-            text-decoration: none !important; }
+        [data-testid="stColumn"]:has(.hero-link-button-marker) button {
+            border: 1px solid __BORDER__; border-radius: 0.5rem;
+            color: __TEXT__; background: transparent;
+        }
         .st-key-scenario_row [data-testid="stHorizontalBlock"],
         [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) > [data-testid="stHorizontalBlock"] {
             gap: 0.35rem;
         }
         .st-key-scenario_row [data-testid="column"] button,
         [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) > [data-testid="stHorizontalBlock"] [data-testid="column"] button {
-            min-height: 4.25rem; border-width: 2px; font-size: 0.72rem;
+            min-height: 4.25rem; border: 2px solid __BORDER__; font-size: 0.72rem;
         }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+1) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+1) button { border-color: #ef4444; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+2) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+2) button { border-color: #f97316; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+3) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+3) button { border-color: #eab308; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+4) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+4) button { border-color: #22c55e; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+5) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+5) button { border-color: #14b8a6; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+6) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+6) button { border-color: #06b6d4; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+7) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+7) button { border-color: #3b82f6; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+8) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+8) button { border-color: #8b5cf6; }
-        .st-key-scenario_row [data-testid="column"]:nth-child(9n+9) button,
-        [data-testid="stVerticalBlock"]:has(.scenario-row-floor-marker) [data-testid="column"]:nth-child(9n+9) button { border-color: #ec4899; }
         @media (max-width: 768px) {
             .st-key-kpi_strip [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
             .st-key-kpi_strip [data-testid="column"] { flex: 1 1 160px; }
