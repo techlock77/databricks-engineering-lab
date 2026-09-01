@@ -12,7 +12,12 @@ APP_PATH = Path(__file__).parents[1] / "src" / "app" / "app.py"
 DEMO_SCRIPT_PATH = Path(__file__).parents[1] / "docs" / "CONTEST_DEMO_SCRIPT.md"
 
 
-def _app_script(genie_effect=None):
+def _app_script(
+    genie_effect=None,
+    stale=False,
+    featured_risk_band=None,
+    flagged_account_limit=None,
+):
     genie_patch = ""
     if genie_effect == "paused":
         genie_patch = """
@@ -68,6 +73,10 @@ from src.pipeline.orchestrator import run_pipeline
 {genie_patch}
 {context_patch}
 gold = run_pipeline(seed=42).gold
+{"gold['freshness'].loc[:, 'is_stale'] = True" if stale else ""}
+{"st.cache_resource.clear()" if stale or featured_risk_band or flagged_account_limit is not None else ""}
+{"flagged = gold['accounts'][gold['accounts']['is_flagged_mule_network'].astype(bool)].sort_values('case_total_exposure_permissive', ascending=False); gold['accounts'].loc[gold['accounts']['account_id'] == flagged.iloc[0]['account_id'], 'risk_band'] = " + repr(featured_risk_band) if featured_risk_band else ""}
+{"flagged = gold['accounts'][gold['accounts']['is_flagged_mule_network'].astype(bool)].sort_values('case_total_exposure_permissive', ascending=False); keep = set(flagged.head(" + str(flagged_account_limit) + ")['account_id']); gold['accounts'].loc[~gold['accounts']['account_id'].isin(keep), 'is_flagged_mule_network'] = False" if flagged_account_limit is not None else ""}
 with patch("src.data_access.load_gold_tables", return_value=gold), genie as genie_mock, context as context_mock:
     runpy.run_path({str(APP_PATH)!r}, run_name="__main__")
 st.session_state.genie_mock_calls = genie_mock.call_count
@@ -152,7 +161,7 @@ def test_app_uses_cross_version_dataframe_width_api():
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "dataframe"
     ]
-    assert len(dataframe_calls) == 4
+    assert len(dataframe_calls) == 5
     assert all(
         any(keyword.arg == "use_container_width" for keyword in call.keywords)
         for call in dataframe_calls
@@ -202,7 +211,24 @@ def test_money_flow_dataframe_and_monthly_bar_chart_render_with_real_streamlit()
     assert '"field": "amount"' in charts[0].proto.spec
 
 
-def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders():
+def test_timeline_tab_renders_policy_scoped_transfers_in_date_order():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_flagged_case(app)
+    _select_section(app, "Timeline")
+
+    assert not app.exception
+    timeline = next(
+        dataframe.value
+        for dataframe in app.dataframe
+        if "txn_date" in dataframe.value.columns
+    )
+    assert {"txn_date", "txn_id", "source_account", "dest_account", "amount"} <= set(
+        timeline.columns
+    )
+    assert timeline["txn_date"].tolist() == sorted(timeline["txn_date"].tolist())
+
+
+def test_alert_queue_opens_flagged_account_and_section_navigation_renders():
     app = AppTest.from_string(_app_script()).run(timeout=10)
 
     assert not app.exception
@@ -212,6 +238,7 @@ def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders()
         "Investigation",
         "Money Flow",
         "Network",
+        "Timeline",
         "Reports",
     ]]
     assert any("Alert Queue" in item.value for item in app.subheader)
@@ -232,7 +259,7 @@ def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders()
     ]
     risk_metric = app.metric[0]
     assert risk_metric.value == "HIGH"
-    assert risk_metric.delta == "🔴 Flagged for review"
+    assert risk_metric.delta == "◆ Flagged for review"
     suggested_buttons = [
         app.button(key=f"genie_suggestion_{index}").label
         for index in range(len(_documented_questions()))
@@ -268,7 +295,7 @@ def test_home_is_default_and_workspace_navigation_is_cleanly_gated():
     assert any("Find the network before the money moves" in item.value for item in app.markdown)
     assert any(button.key and button.key.startswith("scenario_chip_") for button in app.button)
     assert not app.radio
-    assert not app.selectbox
+    assert [selectbox.key for selectbox in app.selectbox] == ["home_scenario_selector"]
     assert not any("Alert Queue" in item.value for item in app.subheader)
     assert not any("Genie is on this case" in item.value for item in app.subheader)
 
@@ -305,23 +332,25 @@ def test_featured_case_copy_uses_real_case_values_and_approved_question():
     ].iloc[0]
     app = AppTest.from_string(_app_script()).run(timeout=10)
     rendered = [item.value for item in app.markdown]
-    assert "**INVESTIGATION CASE**" in rendered
-    assert f"### {top_case.scenario_label}" in rendered
-    assert f"Suspicious Account: {top_account}" in rendered
-    assert f"Potential Pattern: {top_case.scenario_label}" in rendered
-    assert "**INVESTIGATOR'S QUESTION**" in rendered
-    assert "What transfers contribute to the linked exposure?" in rendered
+    assert any("Priority · HIGH" in value for value in rendered)
+    assert f"**Scenario**\n\n### {top_case.scenario_label}" in rendered
+    assert f"**Seed account**\n\n{top_account}" in rendered
+    assert f"**Pattern**\n\n{top_case.scenario_label}" in rendered
+    assert any("What transfers contribute to the linked exposure?" in value for value in rendered)
     assert app.button(key="open_featured_case").label == "Investigate with Genie →"
+
+
+def test_featured_priority_badge_is_sourced_from_account_risk_band():
+    app = AppTest.from_string(
+        _app_script(featured_risk_band="critical")
+    ).run(timeout=10)
+    assert any("Priority · CRITICAL" in item.value for item in app.markdown)
 
 
 def test_all_hero_actions_open_the_same_top_priority_queue_account():
     gold = run_pipeline(seed=42).gold
     expected = _priority_accounts(gold)[0]
-    for key in (
-        "open_highest_priority_case",
-        "ask_genie_top_case",
-        "open_featured_case",
-    ):
+    for key in ("open_highest_priority_case", "open_featured_case"):
         app = AppTest.from_string(_app_script()).run(timeout=10)
         app.button(key=key).click().run(timeout=10)
         assert app.session_state["selected_account"] == expected
@@ -338,7 +367,7 @@ def test_all_hero_actions_open_the_same_top_priority_queue_account():
         assert any("Genie is on this case" in header.value for header in app.subheader)
 
     genie_app = AppTest.from_string(_app_script("success")).run(timeout=10)
-    genie_app.button(key="ask_genie_top_case").click().run(timeout=10)
+    genie_app.button(key="open_featured_case").click().run(timeout=10)
     genie_app.button(key="genie_suggestion_0").click().run(timeout=10)
     assert genie_app.session_state["context_seed_account"] == expected
 
@@ -356,24 +385,40 @@ def test_scenario_chips_use_one_palette_accent_without_rainbow_semantics():
         assert rainbow_color not in scenario_css
 
 
-def test_scenario_chips_render_all_labels_and_open_corresponding_cases():
+def test_scenario_selector_lists_all_cases_and_highlights_next_two():
     gold = run_pipeline(seed=42).gold
     expected = {
-        str(row.scenario_type): (str(row.scenario_label), str(row.seed_account))
+        str(row.scenario_label): str(row.seed_account)
         for row in gold["case_summary"].itertuples(index=False)
     }
     app = AppTest.from_string(_app_script()).run(timeout=10)
     assert len(expected) == 9
-    assert {
-        scenario: app.button(key=f"scenario_chip_{scenario}").label
-        for scenario in expected
-    } == {scenario: values[0] for scenario, values in expected.items()}
+    selector = app.selectbox(key="home_scenario_selector")
+    assert selector.options == list(expected)
+    selected_label = list(expected)[3]
+    selector.set_value(selected_label).run(timeout=10)
+    assert app.session_state["selected_account"] == expected[selected_label]
+    assert app.session_state["top_level_view"] == "workspace"
 
-    for scenario in ("rapid_pass_through", "shared_device_cluster", "large_network"):
-        app = AppTest.from_string(_app_script()).run(timeout=10)
-        app.button(key=f"scenario_chip_{scenario}").click().run(timeout=10)
-        assert app.session_state["selected_account"] == expected[scenario][1]
-        assert app.session_state["top_level_view"] == "workspace"
+    ranked = _priority_accounts(gold)
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    chips = [button for button in app.button if button.key and button.key.startswith("scenario_chip_")]
+    assert [button.key for button in chips] == [
+        f"scenario_chip_{account}" for account in ranked[1:3]
+    ]
+
+
+def test_scenario_row_handles_no_secondary_flagged_accounts():
+    app = AppTest.from_string(
+        _app_script(flagged_account_limit=1)
+    ).run(timeout=10)
+    assert not app.exception
+    assert app.selectbox(key="home_scenario_selector").options
+    assert not [
+        button
+        for button in app.button
+        if button.key and button.key.startswith("scenario_chip_")
+    ]
 
 
 def test_four_process_cards_render_exact_approved_copy():
@@ -399,6 +444,54 @@ def test_four_process_cards_render_exact_approved_copy():
         in caption.value
         for caption in app.caption
     )
+
+
+def test_home_kpi_strip_uses_loaded_gold_totals():
+    gold = run_pipeline(seed=42).gold
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    metrics = {metric.label: metric.value for metric in app.metric}
+    assert metrics == {
+        "Cases": str(len(gold["case_summary"])),
+        "Accounts": str(len(gold["accounts"])),
+        "Connections": str(len(gold["_network_edges_raw"])),
+        "Exposure / evidence": (
+            f"${gold['case_summary']['total_exposure_permissive'].sum():,.2f} · "
+            f"{len(gold['evidence'])} items"
+        ),
+        "Last updated": str(gold["freshness"].iloc[0]["last_refreshed_ts"]),
+    }
+
+
+def test_journey_stage_uses_marker_and_has_selector_for_session_state():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    markers = [item.value for item in app.markdown]
+    assert markers.count('<span class="journey-stage-active"></span>') == 1
+    assert markers.index('<span class="journey-stage-active"></span>') < markers.index(
+        "**01 -- SELECT THE SIGNAL**"
+    )
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert ':has(.journey-stage-active)' in css
+    assert ".st-key-journey_cards" in css
+
+    app.button(key="open_featured_case").click().run(timeout=10)
+    app.button(key="nav_home").click().run(timeout=10)
+    markers = [item.value for item in app.markdown]
+    assert markers.index('<span class="journey-stage-active"></span>') < markers.index(
+        "**02 -- INVESTIGATE WITH GENIE**"
+    )
+
+
+def test_stale_freshness_uses_warning_and_muted_amber_token():
+    app = AppTest.from_string(_app_script(stale=True)).run(timeout=10)
+    _open_flagged_case(app)
+    assert len(app.warning) == 1
+    assert "-- STALE." in app.warning[0].value
+    assert any(
+        item.value == '<span class="freshness-stale-marker"></span>'
+        for item in app.markdown
+    )
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert "border-color: #C79A43" in css
 
 
 def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplicates():
@@ -550,19 +643,24 @@ def test_theme_toggle_changes_literal_palette_and_documents_limitation():
     light_css = next(item.value for item in app.markdown if "stMetric" in item.value)
     assert "#F8FAFC" in light_css and "#172033" in light_css
     assert dark_css != light_css
-    assert any("Native Streamlit chrome" in caption.value for caption in app.caption)
-    assert any(
-        "skinned regions -- nav bar, metrics, dataframes" in caption.value
-        for caption in app.caption
-    )
+    theme_toggle = app.toggle(key="light_mode")
+    assert "Native Streamlit chrome" in theme_toggle.help
+    assert "skinned regions -- nav bar, metrics, dataframes" in theme_toggle.help
 
 
-def test_nav_css_uses_palette_tokens_and_has_mobile_reflow():
+def test_full_stylesheet_uses_palette_tokens_and_nav_has_mobile_reflow():
     source = APP_PATH.read_text(encoding="utf-8")
+    stylesheet = re.search(
+        r'"""(?P<css>\s*<style>.*?</style>\s*)"""\.replace',
+        source,
+        flags=re.DOTALL,
+    )
+    assert stylesheet
+    assert not re.search(r"#[0-9a-fA-F]{3,8}", stylesheet.group("css"))
+
     nav_css = source.split(".top-nav-brand", 1)[1].split(
         '[data-testid="stColumn"]:has(.hero-link-button-marker)', 1
     )[0]
-    assert not re.search(r"#[0-9a-fA-F]{3,8}", nav_css)
     assert {"__TEXT__", "__BORDER__", "__SURFACE__", "__SHADOW__"} <= set(
         re.findall(r"__[A-Z_]+__", nav_css)
     )
@@ -590,7 +688,8 @@ def test_light_mode_css_does_not_override_native_header_color():
     app.toggle(key="light_mode").set_value(True).run(timeout=10)
     css = next(item.value for item in app.markdown if "stMetric" in item.value)
     assert "h2, h3" not in css
-    assert "h2" not in css and "h3" not in css
+    assert "h2" not in css
+    assert '[data-testid="stVerticalBlock"]:has(.ask-genie-subheader-marker) h3' in css
 
 
 def test_kpi_strip_has_narrowly_scoped_reflow_css():
