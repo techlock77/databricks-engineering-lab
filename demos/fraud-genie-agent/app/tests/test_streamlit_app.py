@@ -84,8 +84,17 @@ def _documented_questions():
 
 
 def _open_flagged_case(app):
+    if app.session_state["top_level_view"] == "home":
+        app.button(key="nav_workspace").click().run(timeout=10)
     app.button(key="open_case_ACC_M_COLLECTOR").click().run(timeout=10)
     assert app.session_state["selected_account"] == "ACC_M_COLLECTOR"
+    assert app.session_state["top_level_view"] == "workspace"
+    return app
+
+
+def _open_workspace(app):
+    app.button(key="nav_workspace").click().run(timeout=10)
+    assert app.session_state["top_level_view"] == "workspace"
     return app
 
 
@@ -197,6 +206,7 @@ def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders()
     app = AppTest.from_string(_app_script()).run(timeout=10)
 
     assert not app.exception
+    app.button(key="nav_workspace").click().run(timeout=10)
     assert [radio.options for radio in app.radio] == [[
         "Overview",
         "Investigation",
@@ -240,12 +250,60 @@ def test_landing_hero_is_live_computed_and_disappears_after_opening_case():
     )
     assert any("Find the network before the money moves" in value for value in rendered)
     assert any(expected_stat in value for value in rendered)
-    assert any('id="ask-genie"' in value for value in rendered)
+    assert not any('id="ask-genie"' in value for value in rendered)
 
     app.button(key="open_highest_priority_case").click().run(timeout=10)
     assert not any(
         "Find the network before the money moves" in item.value for item in app.markdown
     )
+
+
+def test_home_is_default_and_workspace_navigation_is_cleanly_gated():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    assert app.session_state["top_level_view"] == "home"
+    assert any("Find the network before the money moves" in item.value for item in app.markdown)
+    assert any(button.key and button.key.startswith("scenario_chip_") for button in app.button)
+    assert not app.radio
+    assert not app.selectbox
+    assert not any("Alert Queue" in item.value for item in app.subheader)
+    assert not any("Genie is on this case" in item.value for item in app.subheader)
+
+    _open_workspace(app)
+    assert any("Alert Queue" in item.value for item in app.subheader)
+    assert not any("Find the network before the money moves" in item.value for item in app.markdown)
+
+
+def test_home_and_workspace_navigation_resume_selected_case():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    app.button(key="open_highest_priority_case").click().run(timeout=10)
+    selected_account = app.session_state["selected_account"]
+    assert selected_account
+
+    app.button(key="nav_home").click().run(timeout=10)
+    assert app.session_state["top_level_view"] == "home"
+    assert app.session_state["selected_account"] == selected_account
+    assert any("Find the network before the money moves" in item.value for item in app.markdown)
+
+    _open_workspace(app)
+    assert app.session_state["selected_account"] == selected_account
+    assert any(f"Case: {selected_account}" in item.value for item in app.subheader)
+
+
+def test_featured_case_copy_uses_real_case_values_and_approved_question():
+    gold = run_pipeline(seed=42).gold
+    top_account = _priority_accounts(gold)[0]
+    top_case = gold["case_summary"][
+        gold["case_summary"]["seed_account"].astype(str) == top_account
+    ].iloc[0]
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    rendered = [item.value for item in app.markdown]
+    assert "**INVESTIGATION CASE**" in rendered
+    assert f"### {top_case.scenario_label}" in rendered
+    assert f"Suspicious Account: {top_account}" in rendered
+    assert f"Potential Pattern: {top_case.scenario_label}" in rendered
+    assert "**INVESTIGATOR'S QUESTION**" in rendered
+    assert "What transfers contribute to the linked exposure?" in rendered
+    assert app.button(key="open_featured_case").label == "Investigate with Genie →"
 
 
 def test_all_hero_actions_open_the_same_top_priority_queue_account():
@@ -259,6 +317,7 @@ def test_all_hero_actions_open_the_same_top_priority_queue_account():
         app = AppTest.from_string(_app_script()).run(timeout=10)
         app.button(key=key).click().run(timeout=10)
         assert app.session_state["selected_account"] == expected
+        assert app.session_state["top_level_view"] == "workspace"
         assert any(f"Case: {expected}" in header.value for header in app.subheader)
         assert [metric.label for metric in app.metric] == [
             "Risk band",
@@ -306,24 +365,25 @@ def test_scenario_chips_render_all_labels_and_open_corresponding_cases():
         app = AppTest.from_string(_app_script()).run(timeout=10)
         app.button(key=f"scenario_chip_{scenario}").click().run(timeout=10)
         assert app.session_state["selected_account"] == expected[scenario][1]
+        assert app.session_state["top_level_view"] == "workspace"
 
 
 def test_four_process_cards_render_exact_approved_copy():
     app = AppTest.from_string(_app_script()).run(timeout=10)
     rendered = [item.value for item in app.markdown]
     expected = [
-        "**01 · SPOT THE ALERT**",
-        "**02 · ASK GENIE**",
-        "**03 · FOLLOW THE MONEY**",
-        "**04 · REVEAL THE PATTERN**",
+        "**01 -- SELECT THE SIGNAL**",
+        "**02 -- INVESTIGATE WITH GENIE**",
+        "**03 -- FOLLOW THE MONEY**",
+        "**04 -- ASSESS THE IMPACT**",
     ]
     assert all(text in rendered for text in expected)
     writes = [item.value for item in app.markdown]
     descriptions = [
-        "Start from one flagged account and see why it was prioritized for investigator review.",
-        "Ask a grounded question about the case and get an answer from the investigation-ready Gold data.",
-        "Trace shared devices and fund flow outward to reveal the full connected network.",
-        "Toggle the evidence policy to separate fund-flow-corroborated facts from weaker device-only links.",
+        "Choose a suspicious seed account.",
+        "Understand why the activity is unusual.",
+        "Discover connected accounts and transaction paths.",
+        "Identify potential victims, exposure, and evidence requiring review.",
     ]
     assert all(text in writes for text in descriptions)
     assert any(
@@ -335,6 +395,7 @@ def test_four_process_cards_render_exact_approved_copy():
 
 def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplicates():
     app = AppTest.from_string(_app_script("paused")).run(timeout=10)
+    _open_workspace(app)
     question = _documented_questions()[0]
 
     app.button(key="genie_suggestion_0").click().run(timeout=10)
@@ -366,6 +427,7 @@ def test_investigate_with_genie_submits_the_approved_question():
 
 def test_genie_error_becomes_assistant_message_instead_of_crashing():
     app = AppTest.from_string(_app_script("error")).run(timeout=10)
+    _open_workspace(app)
 
     app.button(key="genie_suggestion_0").click().run(timeout=10)
 
@@ -410,6 +472,7 @@ def test_network_graph_and_structured_reports_render():
 
 def test_genie_response_renders_insight_card_evidence_and_freshness():
     app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    _open_workspace(app)
 
     app.button(key="genie_suggestion_0").click().run(timeout=10)
 
@@ -480,6 +543,20 @@ def test_theme_toggle_changes_literal_palette_and_documents_limitation():
     assert "#F8FAFC" in light_css and "#172033" in light_css
     assert dark_css != light_css
     assert any("Native Streamlit chrome" in caption.value for caption in app.caption)
+    assert any("including the nav bar" in caption.value for caption in app.caption)
+
+
+def test_nav_css_uses_palette_tokens_and_has_mobile_reflow():
+    source = APP_PATH.read_text(encoding="utf-8")
+    nav_css = source.split(".top-nav-brand", 1)[1].split(
+        '[data-testid="stColumn"]:has(.hero-link-button-marker)', 1
+    )[0]
+    assert not re.search(r"#[0-9a-fA-F]{3,8}", nav_css)
+    assert {"__TEXT__", "__BORDER__", "__SURFACE__", "__SHADOW__"} <= set(
+        re.findall(r"__[A-Z_]+__", nav_css)
+    )
+    assert ".top-nav-floor-marker" in source
+    assert "flex: 1 1 240px" in source
 
 
 def test_light_mode_css_does_not_override_native_header_color():
@@ -500,6 +577,7 @@ def test_kpi_strip_has_narrowly_scoped_reflow_css():
 
 def test_account_selector_resets_chat_and_changes_actual_kpis():
     app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_workspace(app)
     selector = app.selectbox(key="account_selector")
     simple = next(option for option in selector.options if "ACC_M_COLLECTOR" in option)
     selector.set_value(simple).run(timeout=10)
@@ -518,6 +596,7 @@ def test_account_selector_resets_chat_and_changes_actual_kpis():
 
 def test_non_flagged_selector_label_is_not_duplicated():
     app = AppTest.from_string(_app_script()).run(timeout=10)
+    _open_workspace(app)
     control = next(
         option for option in app.selectbox(key="account_selector").options
         if "ACC_C_HUB" in option
@@ -528,6 +607,7 @@ def test_non_flagged_selector_label_is_not_duplicated():
 
 def test_success_replaces_initial_questions_with_hand_authored_followups():
     app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    _open_workspace(app)
     initial = [app.button(key=f"genie_suggestion_{i}").label for i in range(9)]
     app.button(key="genie_suggestion_0").click().run(timeout=10)
     followups = [app.button(key=f"genie_suggestion_{i}").label for i in range(3)]
@@ -538,6 +618,7 @@ def test_success_replaces_initial_questions_with_hand_authored_followups():
 
 def test_disabled_genie_never_constructs_context_or_calls_query():
     app = AppTest.from_string(_app_script("disabled")).run(timeout=10)
+    _open_workspace(app)
     app.toggle(key="genie_disabled").set_value(True).run(timeout=10)
     assert any(
         "Genie is currently disabled for this demo" in caption.value
@@ -552,6 +633,7 @@ def test_disabled_genie_never_constructs_context_or_calls_query():
 
 def test_restoring_genie_resumes_successful_querying():
     app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    _open_workspace(app)
     app.toggle(key="genie_disabled").set_value(True).run(timeout=10)
     app.button(key="genie_suggestion_0").click().run(timeout=10)
     assert app.session_state["genie_mock_calls"] == 0

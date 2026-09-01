@@ -99,6 +99,8 @@ def _init_session_state() -> None:
         st.session_state.genie_disabled = False
     if "light_mode" not in st.session_state:
         st.session_state.light_mode = False
+    if "top_level_view" not in st.session_state:
+        st.session_state.top_level_view = "home"
 
 
 def _reset_evidence_policy() -> None:
@@ -109,7 +111,12 @@ def _select_section(section_name: str) -> None:
     st.session_state.active_section = section_name
 
 
+def _select_top_level_view(view_name: str) -> None:
+    st.session_state.top_level_view = view_name
+
+
 def _open_case(account_id: str) -> None:
+    st.session_state.top_level_view = "workspace"
     if st.session_state.selected_account != account_id:
         _reset_investigation(account_id)
     st.session_state.account_selector = next(
@@ -430,16 +437,14 @@ def render_landing_hero(gold: dict, flagged) -> None:
             )
         with featured:
             with st.container(border=True):
-                st.markdown("**TODAY'S FLAGGED CASE**")
+                st.markdown("**INVESTIGATION CASE**")
                 st.markdown(f"### {top_case.scenario_label}")
-                st.caption(f"Risk band: {str(flagged.iloc[0]['risk_band']).upper()}")
-                exposure = float(top_case.total_exposure_permissive)
-                st.markdown(f"**${exposure:,.2f}** linked exposure")
-                st.caption(
-                    f"{int(top_case.other_connected_accounts_permissive)} connected accounts"
-                )
+                st.markdown(f"Suspicious Account: {top_account}")
+                st.markdown(f"Potential Pattern: {top_case.scenario_label}")
+                st.markdown("**INVESTIGATOR'S QUESTION**")
+                st.markdown(GENIE_QUESTIONS[5])
                 st.button(
-                    "Open this case →",
+                    "Investigate with Genie →",
                     key="open_featured_case",
                     on_click=_open_case,
                     args=(top_account,),
@@ -469,20 +474,20 @@ def render_scenario_row(gold: dict) -> None:
 def render_process_cards() -> None:
     cards = [
         (
-            "01 · SPOT THE ALERT",
-            "Start from one flagged account and see why it was prioritized for investigator review.",
+            "01 -- SELECT THE SIGNAL",
+            "Choose a suspicious seed account.",
         ),
         (
-            "02 · ASK GENIE",
-            "Ask a grounded question about the case and get an answer from the investigation-ready Gold data.",
+            "02 -- INVESTIGATE WITH GENIE",
+            "Understand why the activity is unusual.",
         ),
         (
-            "03 · FOLLOW THE MONEY",
-            "Trace shared devices and fund flow outward to reveal the full connected network.",
+            "03 -- FOLLOW THE MONEY",
+            "Discover connected accounts and transaction paths.",
         ),
         (
-            "04 · REVEAL THE PATTERN",
-            "Toggle the evidence policy to separate fund-flow-corroborated facts from weaker device-only links.",
+            "04 -- ASSESS THE IMPACT",
+            "Identify potential victims, exposure, and evidence requiring review.",
         ),
     ]
     columns = st.columns(4)
@@ -557,9 +562,28 @@ def render_reports_tab(
 
 def main() -> None:
     _init_session_state()
+    nav_kwargs = {"key": "top_nav"} if "key" in inspect.signature(st.container).parameters else {}
+    with st.container(**nav_kwargs):
+        st.markdown('<span class="top-nav-floor-marker"></span>', unsafe_allow_html=True)
+        brand, destinations, badge = st.columns([2, 3, 2])
+        brand.markdown(
+            '<div class="top-nav-brand">🔎 MuleGraph Investigator'
+            '<span>Follow the money. Uncover the network.</span></div>',
+            unsafe_allow_html=True,
+        )
+        home, workspace = destinations.columns(2)
+        home.button("Home", key="nav_home", on_click=_select_top_level_view,
+                    args=("home",), use_container_width=True)
+        workspace.button("Investigation Workspace", key="nav_workspace",
+                         on_click=_select_top_level_view, args=("workspace",),
+                         use_container_width=True)
+        badge.markdown(
+            '<span class="top-nav-badge">⚡ Powered by Databricks Genie</span>',
+            unsafe_allow_html=True,
+        )
     st.toggle("Light mode", key="light_mode")
     st.caption(
-        "Light mode flips only the app's six skinned selectors "
+        "Light mode flips only the app's skinned regions, including the nav bar "
         "(metrics, dataframes, expander borders/headers, radio pills, and chat messages). "
         "Native Streamlit chrome remains governed by config.toml base=\"dark\" and will not fully flip."
     )
@@ -616,6 +640,12 @@ def main() -> None:
         .hero-subheadline { color: __TEXT__; opacity: 0.72; font-size: 1.05rem;
             margin: 1rem 0 0.65rem; max-width: 44rem; }
         .hero-stat { color: __TEXT__; opacity: 0.78; font-size: 0.85rem; }
+        .top-nav-brand { color: __TEXT__; font-weight: 700; }
+        .top-nav-brand span { display: block; color: __TEXT__; opacity: 0.72;
+            font-size: 0.8rem; font-weight: 400; }
+        .top-nav-badge { display: inline-block; border: 1px solid __BORDER__;
+            border-radius: 999px; padding: 0.45rem 0.8rem; background: __SURFACE__;
+            color: __TEXT__; box-shadow: 0 8px 24px __SHADOW__; opacity: 0.78; }
         [data-testid="stColumn"]:has(.hero-link-button-marker) button {
             border: 1px solid __BORDER__; border-radius: 0.5rem;
             color: __TEXT__; background: transparent;
@@ -629,6 +659,10 @@ def main() -> None:
             min-height: 4.25rem; border: 2px solid __BORDER__; font-size: 0.72rem;
         }
         @media (max-width: 768px) {
+            .st-key-top_nav [data-testid="stHorizontalBlock"],
+            [data-testid="stVerticalBlock"]:has(.top-nav-floor-marker) > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            .st-key-top_nav [data-testid="stHorizontalBlock"] > [data-testid="column"],
+            [data-testid="stVerticalBlock"]:has(.top-nav-floor-marker) > [data-testid="stHorizontalBlock"] > [data-testid="column"] { flex: 1 1 240px; }
             .st-key-kpi_strip [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
             .st-key-kpi_strip [data-testid="column"] { flex: 1 1 160px; }
             [data-testid="stVerticalBlock"]:has(.kpi-strip-floor-marker) > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
@@ -662,6 +696,13 @@ def main() -> None:
             (label for label, value in account_option_ids.items() if value == st.session_state.selected_account),
             ALL_ALERTS,
         )
+    if st.session_state.top_level_view == "home":
+        flagged = _sorted_flagged_accounts(gold)
+        render_landing_hero(gold, flagged)
+        render_scenario_row(gold)
+        render_process_cards()
+        return
+
     st.selectbox(
         "Investigation account",
         options=options,
@@ -679,16 +720,10 @@ def main() -> None:
         label_visibility="collapsed",
     )
 
-    if selected_account is None:
-        flagged = _sorted_flagged_accounts(gold)
-        render_landing_hero(gold, flagged)
-        render_scenario_row(gold)
-        render_process_cards()
-
     section_column, genie_column = st.columns([2, 1], gap="large")
     with section_column:
         if selected_account is None:
-            render_alert_queue(gold, flagged)
+            render_alert_queue(gold)
         else:
             render_case_header(gold, seed_account)
             metrics = views.blast_radius_metrics(gold, seed_account, evidence_policy)
