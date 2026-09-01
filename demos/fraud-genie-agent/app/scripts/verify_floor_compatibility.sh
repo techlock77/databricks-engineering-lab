@@ -35,6 +35,12 @@ assert "use_container_width" in inspect.signature(streamlit.dataframe).parameter
 assert "disabled" in inspect.signature(streamlit.button).parameters
 assert "page_icon" in inspect.signature(streamlit.set_page_config).parameters
 assert "horizontal" in inspect.signature(streamlit.radio).parameters
+assert "use_container_width" in inspect.signature(streamlit.graphviz_chart).parameters
+assert "x" in inspect.signature(streamlit.bar_chart).parameters
+assert "y" in inspect.signature(streamlit.bar_chart).parameters
+assert "use_container_width" in inspect.signature(streamlit.bar_chart).parameters
+assert list(inspect.signature(streamlit.divider).parameters) == []
+assert list(inspect.signature(streamlit.expander).parameters) == ["label", "expanded"]
 
 status_app = AppTest.from_string(
     """
