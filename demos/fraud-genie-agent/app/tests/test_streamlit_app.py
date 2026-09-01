@@ -28,28 +28,38 @@ genie = patch("src.genie.interface.genie_query", side_effect=RuntimeError("Genie
     elif genie_effect == "success":
         genie_patch = """
 from src.genie.interface import Citation, GenieResponse
-genie = patch(
-    "src.genie.interface.genie_query",
-    return_value=GenieResponse(
+def successful_genie_query(question, context):
+    st.session_state.query_invocations = st.session_state.get("query_invocations", 0) + 1
+    return GenieResponse(
         question="Why was `ACC_M_COLLECTOR` flagged?",
         answer="The account shows concentrated fan-in followed by rapid fan-out.",
         citations=[Citation("gold_evidence", "EVID_001", "Five inbound sources")],
         freshness_note="Evidence as of 2026-06-01 (current).",
         evidence_policy="permissive",
-    ),
+    )
+genie = patch(
+    "src.genie.interface.genie_query",
+    side_effect=successful_genie_query,
 )
 """
     else:
         genie_patch = "genie = patch(\"src.genie.interface.genie_query\")"
 
+    context_patch = "context = patch(\"src.genie.interface.GenieContext\", side_effect=AssertionError(\"GenieContext constructed\"))" if genie_effect == "disabled" else "context = patch(\"src.genie.interface.GenieContext\")"
+    if genie_effect == "disabled":
+        genie_patch = "genie = patch(\"src.genie.interface.genie_query\", side_effect=AssertionError(\"genie_query called\"))"
     return f"""
 from unittest.mock import patch
 import runpy
+import streamlit as st
 from src.pipeline.orchestrator import run_pipeline
 {genie_patch}
+{context_patch}
 gold = run_pipeline(seed=42).gold
-with patch("src.data_access.load_gold_tables", return_value=gold), genie:
+with patch("src.data_access.load_gold_tables", return_value=gold), genie as genie_mock, context as context_mock:
     runpy.run_path({str(APP_PATH)!r}, run_name="__main__")
+st.session_state.genie_mock_calls = genie_mock.call_count
+st.session_state.context_mock_calls = context_mock.call_count
 """
 
 
@@ -172,7 +182,7 @@ def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders()
         "Reports",
     ]]
     assert any("Alert Queue" in item.value for item in app.subheader)
-    assert any("1 active alert" in caption.value for caption in app.caption)
+    assert any("8 active alerts" in caption.value for caption in app.caption)
     assert app.button(key="open_case_ACC_M_COLLECTOR").label == "Open case →"
 
     _open_flagged_case(app)
@@ -208,10 +218,7 @@ def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplic
     assert f"**Question:** {question}" in [item.value for item in app.markdown]
     assert [status.label for status in app.status] == ["Genie is investigating..."]
     assert app.chat_input[0].disabled
-    assert all(
-        app.button(key=f"genie_suggestion_{index}").disabled
-        for index in range(len(_documented_questions()))
-    )
+    assert not any(button.key and button.key.startswith("genie_suggestion_") for button in app.button)
 
 
 def test_investigate_with_genie_submits_the_approved_question():
@@ -325,3 +332,71 @@ def test_genie_panel_is_persistent_on_every_section():
         headers = [item.value for item in app.subheader]
         assert any("Genie is on this case" in header for header in headers)
         assert app.button(key="genie_suggestion_0").label == _documented_questions()[0]
+
+
+def test_theme_toggle_changes_literal_palette_and_documents_limitation():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    dark_css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert "#132238" in dark_css and "#E6EDF3" in dark_css
+    app.toggle(key="light_mode").set_value(True).run(timeout=10)
+    light_css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert "#F8FAFC" in light_css and "#172033" in light_css
+    assert dark_css != light_css
+    assert any("Native Streamlit chrome" in caption.value for caption in app.caption)
+
+
+def test_kpi_strip_has_narrowly_scoped_reflow_css():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    assert ".st-key-kpi_strip [data-testid=\"stHorizontalBlock\"]" in css
+    assert "flex: 1 1 160px" in css
+    assert "@media (max-width: 768px)" in css
+
+
+def test_account_selector_resets_chat_and_changes_actual_kpis():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    selector = app.selectbox(key="account_selector")
+    simple = next(option for option in selector.options if "ACC_M_COLLECTOR" in option)
+    selector.set_value(simple).run(timeout=10)
+    first_exposure = next(metric.value for metric in app.metric if metric.label == "Linked exposure")
+    app.session_state["chat_history"] = [{"role": "assistant", "content": "stale case"}]
+    app.session_state["next_suggestions"] = ["stale suggestion"]
+    selector = app.selectbox(key="account_selector")
+    large = next(option for option in selector.options if "ACC_LARGE_COLLECTOR" in option)
+    selector.set_value(large).run(timeout=10)
+    second_exposure = next(metric.value for metric in app.metric if metric.label == "Linked exposure")
+    assert app.session_state["selected_account"] == "ACC_LARGE_COLLECTOR"
+    assert app.session_state["chat_history"] == []
+    assert app.session_state["next_suggestions"] == []
+    assert first_exposure != second_exposure
+
+
+def test_success_replaces_initial_questions_with_hand_authored_followups():
+    app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    initial = [app.button(key=f"genie_suggestion_{i}").label for i in range(9)]
+    app.button(key="genie_suggestion_0").click().run(timeout=10)
+    followups = [app.button(key=f"genie_suggestion_{i}").label for i in range(3)]
+    assert len(followups) == 3
+    assert followups != initial[:3]
+    assert followups == [_documented_questions()[4], _documented_questions()[1], _documented_questions()[8]]
+
+
+def test_disabled_genie_never_constructs_context_or_calls_query():
+    app = AppTest.from_string(_app_script("disabled")).run(timeout=10)
+    app.toggle(key="genie_disabled").set_value(True).run(timeout=10)
+    app.button(key="genie_suggestion_0").click().run(timeout=10)
+    assert not app.exception
+    assert app.session_state["genie_mock_calls"] == 0
+    assert app.session_state["context_mock_calls"] == 0
+    assert any("conversational tracing is unavailable" in value.value for value in app.markdown)
+
+
+def test_restoring_genie_resumes_successful_querying():
+    app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    app.toggle(key="genie_disabled").set_value(True).run(timeout=10)
+    app.button(key="genie_suggestion_0").click().run(timeout=10)
+    assert app.session_state["genie_mock_calls"] == 0
+    app.toggle(key="genie_disabled").set_value(False).run(timeout=10)
+    app.button(key="genie_suggestion_0").click().run(timeout=10)
+    assert app.session_state["query_invocations"] == 1
+    assert any("concentrated fan-in" in item.value for item in app.markdown)

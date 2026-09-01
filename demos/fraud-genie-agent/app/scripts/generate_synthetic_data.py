@@ -26,7 +26,7 @@
 
 dbutils.widgets.text("catalog", "mulegraph", "Catalog name")
 dbutils.widgets.text("schema", "investigations", "Schema name")
-dbutils.widgets.text("scale_factor", "3", "Number of independent cases to generate")
+dbutils.widgets.text("scale_factor", "1", "Curated nine-scenario dataset (compatibility setting)")
 dbutils.widgets.text("seed", "42", "Random seed for reproducibility")
 dbutils.widgets.text(
     "repo_path",
@@ -110,7 +110,7 @@ except ImportError:
 
 result = run_pipeline(seed=seed, scale_factor=scale_factor)
 
-print(f"Generated data for {result.scale_factor} independent case(s)")
+print(f"Generated {len(result.gold['case_summary'])} independently selectable scenario cases")
 print(f"Gold tables: {GOLD_TABLE_NAMES}")
 print(f"case_summary rows: {len(result.gold['case_summary'])}")
 
@@ -136,7 +136,7 @@ for table_name in GOLD_TABLE_NAMES:
     spark_df = spark.createDataFrame(pandas_df)
 
     full_table_name = f"{catalog_quoted}.{schema_quoted}.{quote_identifier(table_name)}"
-    spark_df.write.mode("overwrite").saveAsTable(full_table_name)
+    spark_df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(full_table_name)
 
     row_count = spark.table(full_table_name).count()
     print(f"Wrote {row_count:,} rows to {catalog}.{schema}.{table_name}")
