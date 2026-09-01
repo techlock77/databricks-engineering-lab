@@ -1,7 +1,7 @@
 """Citation-backed case-file export.
 
 The export's item count is derived from the exact same
-`views.filter_evidence` call the Evidence panel uses to decide what to
+`views.case_evidence` call the Evidence panel uses to decide what to
 display, plus the case-summary row. There is no second, independent count
 computed anywhere -- that is what keeps the export count and the UI's
 displayed row count from drifting apart.
@@ -39,15 +39,27 @@ class ExportBundle:
 def build_case_export(
     gold: dict[str, pd.DataFrame], seed_account: str, evidence_policy: str
 ) -> ExportBundle:
-    evidence_in_scope = views.filter_evidence(gold["evidence"], evidence_policy)
-    case_row = gold["case_summary"].iloc[0]
+    evidence_in_scope = views.case_evidence(gold, seed_account, evidence_policy)
+    case_rows = gold["case_summary"][
+        gold["case_summary"]["seed_account"].astype(str) == str(seed_account)
+    ]
+    if case_rows.empty:
+        raise ValueError(f"No case summary found for seed account {seed_account!r}")
+    case_row = case_rows.iloc[0]
+
+    citations = gold.get("export_citations", pd.DataFrame())
+    citation_text_by_evidence_id = {
+        str(row.source_row_id): row.citation_text
+        for row in citations.itertuples(index=False)
+        if row.source_table == "gold_evidence"
+    }
 
     items = [
         ExportItem(
             item_type="evidence",
             source_table="gold_evidence",
             source_row_id=row.evidence_id,
-            text=row.description,
+            text=citation_text_by_evidence_id.get(str(row.evidence_id), row.description),
         )
         for row in evidence_in_scope.itertuples(index=False)
     ]
