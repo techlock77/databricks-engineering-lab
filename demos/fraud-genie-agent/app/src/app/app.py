@@ -219,7 +219,7 @@ def _render_chat_history() -> None:
                 st.write(turn["content"])
             citations = turn.get("citations", [])
             if citations:
-                with st.expander("View evidence", expanded=False):
+                with st.expander("View evidence", expanded=True):
                     for citation in citations:
                         st.write(
                             f"{citation.source_table}#{citation.source_row_id}: "

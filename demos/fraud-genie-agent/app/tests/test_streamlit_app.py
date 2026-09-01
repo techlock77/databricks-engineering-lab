@@ -254,7 +254,10 @@ def test_genie_response_renders_insight_card_evidence_and_freshness():
     rendered_text = [item.value for item in app.markdown]
     assert f"**Question:** {_documented_questions()[0]}" in rendered_text
     assert any("concentrated fan-in" in text for text in rendered_text)
-    assert "View evidence" in [expander.label for expander in app.expander]
+    evidence_expander = next(
+        expander for expander in app.expander if expander.label == "View evidence"
+    )
+    assert evidence_expander.proto.expanded
     assert any("gold_evidence#EVID_001" in text for text in rendered_text)
     assert any("Evidence as of 2026-06-01" in caption.value for caption in app.caption)
 
