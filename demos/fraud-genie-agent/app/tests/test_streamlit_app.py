@@ -5,6 +5,8 @@ import sys
 
 from streamlit.testing.v1 import AppTest
 
+from src.pipeline.orchestrator import run_pipeline
+
 
 APP_PATH = Path(__file__).parents[1] / "src" / "app" / "app.py"
 DEMO_SCRIPT_PATH = Path(__file__).parents[1] / "docs" / "CONTEST_DEMO_SCRIPT.md"
@@ -23,7 +25,10 @@ genie = patch("src.genie.interface.genie_query", side_effect=test_genie_query)
 """
     elif genie_effect == "error":
         genie_patch = """
-genie = patch("src.genie.interface.genie_query", side_effect=RuntimeError("Genie unavailable"))
+genie = patch(
+    "src.genie.interface.genie_query",
+    side_effect=RuntimeError("Genie Space schema out of sync"),
+)
 """
     elif genie_effect == "success":
         genie_patch = """
@@ -45,7 +50,12 @@ genie = patch(
     else:
         genie_patch = "genie = patch(\"src.genie.interface.genie_query\")"
 
-    context_patch = "context = patch(\"src.genie.interface.GenieContext\", side_effect=AssertionError(\"GenieContext constructed\"))" if genie_effect == "disabled" else "context = patch(\"src.genie.interface.GenieContext\")"
+    context_patch = "context = patch(\"src.genie.interface.GenieContext\", side_effect=AssertionError(\"GenieContext constructed\"))" if genie_effect == "disabled" else """
+def capture_context(**kwargs):
+    st.session_state.context_seed_account = kwargs["seed_account"]
+    return object()
+context = patch("src.genie.interface.GenieContext", side_effect=capture_context)
+"""
     if genie_effect == "disabled":
         genie_patch = "genie = patch(\"src.genie.interface.genie_query\", side_effect=AssertionError(\"genie_query called\"))"
     return f"""
@@ -75,6 +85,17 @@ def _open_flagged_case(app):
     app.button(key="open_case_ACC_M_COLLECTOR").click().run(timeout=10)
     assert app.session_state["selected_account"] == "ACC_M_COLLECTOR"
     return app
+
+
+def _priority_accounts(gold):
+    flagged = gold["accounts"][gold["accounts"]["is_flagged_mule_network"].astype(bool)].copy()
+    risk_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    flagged["_risk_order"] = (
+        flagged["risk_band"].astype(str).str.lower().map(risk_order).fillna(0)
+    )
+    return flagged.sort_values(
+        ["_risk_order", "case_total_exposure_permissive"], ascending=False
+    )["account_id"].astype(str).tolist()
 
 
 def _select_section(app, section):
@@ -207,6 +228,109 @@ def test_alert_queue_opens_flagged_account_and_five_section_navigation_renders()
     assert suggested_buttons == _documented_questions()
 
 
+def test_landing_hero_is_live_computed_and_disappears_after_opening_case():
+    gold = run_pipeline(seed=42).gold
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    rendered = [item.value for item in app.markdown]
+    expected_stat = (
+        f'{len(gold["case_summary"])} scenario cases · {len(gold["accounts"])} accounts · '
+        f'{gold["freshness"].iloc[0]["last_refreshed_ts"]} refreshed'
+    )
+    assert any("Find the network before the money moves" in value for value in rendered)
+    assert any(expected_stat in value for value in rendered)
+    assert any('id="ask-genie"' in value for value in rendered)
+
+    app.button(key="open_highest_priority_case").click().run(timeout=10)
+    assert not any(
+        "Find the network before the money moves" in item.value for item in app.markdown
+    )
+
+
+def test_all_hero_actions_open_the_same_top_priority_queue_account():
+    gold = run_pipeline(seed=42).gold
+    expected = _priority_accounts(gold)[0]
+    for key in (
+        "open_highest_priority_case",
+        "ask_genie_top_case",
+        "open_featured_case",
+    ):
+        app = AppTest.from_string(_app_script()).run(timeout=10)
+        app.button(key=key).click().run(timeout=10)
+        assert app.session_state["selected_account"] == expected
+        assert any(f"Case: {expected}" in header.value for header in app.subheader)
+        assert [metric.label for metric in app.metric] == [
+            "Risk band",
+            "Linked exposure",
+            "Connected accounts",
+            "Potential victims",
+            "Shared devices",
+            "External destinations",
+        ]
+        assert any("Genie is on this case" in header.value for header in app.subheader)
+
+    genie_app = AppTest.from_string(_app_script("success")).run(timeout=10)
+    genie_app.button(key="ask_genie_top_case").click().run(timeout=10)
+    genie_app.button(key="genie_suggestion_0").click().run(timeout=10)
+    assert genie_app.session_state["context_seed_account"] == expected
+
+
+def test_scenario_chips_use_one_palette_accent_without_rainbow_semantics():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    css = next(item.value for item in app.markdown if "stMetric" in item.value)
+    scenario_css = css.split('.st-key-scenario_row', 1)[1].split('@media', 1)[0]
+    assert "nth-child" not in scenario_css
+    assert "border: 2px solid #14B8A6" in scenario_css
+    for rainbow_color in (
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+        "#3b82f6", "#8b5cf6", "#ec4899",
+    ):
+        assert rainbow_color not in scenario_css
+
+
+def test_scenario_chips_render_all_labels_and_open_corresponding_cases():
+    gold = run_pipeline(seed=42).gold
+    expected = {
+        str(row.scenario_type): (str(row.scenario_label), str(row.seed_account))
+        for row in gold["case_summary"].itertuples(index=False)
+    }
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    assert len(expected) == 9
+    assert {
+        scenario: app.button(key=f"scenario_chip_{scenario}").label
+        for scenario in expected
+    } == {scenario: values[0] for scenario, values in expected.items()}
+
+    for scenario in ("rapid_pass_through", "shared_device_cluster", "large_network"):
+        app = AppTest.from_string(_app_script()).run(timeout=10)
+        app.button(key=f"scenario_chip_{scenario}").click().run(timeout=10)
+        assert app.session_state["selected_account"] == expected[scenario][1]
+
+
+def test_four_process_cards_render_exact_approved_copy():
+    app = AppTest.from_string(_app_script()).run(timeout=10)
+    rendered = [item.value for item in app.markdown]
+    expected = [
+        "**01 · SPOT THE ALERT**",
+        "**02 · ASK GENIE**",
+        "**03 · FOLLOW THE MONEY**",
+        "**04 · REVEAL THE PATTERN**",
+    ]
+    assert all(text in rendered for text in expected)
+    writes = [item.value for item in app.markdown]
+    descriptions = [
+        "Start from one flagged account and see why it was prioritized for investigator review.",
+        "Ask a grounded question about the case and get an answer from the investigation-ready Gold data.",
+        "Trace shared devices and fund flow outward to reveal the full connected network.",
+        "Toggle the evidence policy to separate fund-flow-corroborated facts from weaker device-only links.",
+    ]
+    assert all(text in writes for text in descriptions)
+    assert any(
+        "Every number -- strict or permissive -- comes from the same eight Gold tables"
+        in caption.value
+        for caption in app.caption
+    )
+
+
 def test_genie_waiting_state_keeps_page_and_question_visible_and_disables_duplicates():
     app = AppTest.from_string(_app_script("paused")).run(timeout=10)
     question = _documented_questions()[0]
@@ -246,7 +370,15 @@ def test_genie_error_becomes_assistant_message_instead_of_crashing():
     assert not app.exception
     rendered_text = [item.value for item in app.markdown]
     assert f"**Question:** {_documented_questions()[0]}" in rendered_text
-    assert any("Genie could not complete this question" in text for text in rendered_text)
+    expected_fallback = (
+        "Genie could not complete this question. You can continue the "
+        "investigation with the KPI strip, Investigation evidence, and "
+        "Network connected accounts while the service recovers."
+    )
+    assert expected_fallback in rendered_text
+    details = next(expander for expander in app.expander if expander.label == "Technical details")
+    assert not details.proto.expanded
+    assert "RuntimeError: Genie Space schema out of sync" in rendered_text
     assert not app.session_state["is_querying"]
 
 

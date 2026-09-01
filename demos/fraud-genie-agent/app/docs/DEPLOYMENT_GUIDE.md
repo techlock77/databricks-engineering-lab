@@ -270,7 +270,7 @@ Click **Run all** and wait for `Data generation complete. Genie can now query th
 
 ### VALIDATE
 
-The final output must show: `accounts` 117, `evidence` 36, `network_edges` 172, `transfers` 390, `case_summary` 3, `control_cohort` 27, `freshness` 8, `export_citations` 39. Rerun Stage 2's count query for an independent check.
+The final output must show: `accounts` 138, `evidence` 52, `network_edges` 129, `transfers` 332, `case_summary` 9, `control_cohort` 9, `freshness` 8, `export_citations` 61 (nine independently selectable scenario cases, not one). Rerun Stage 2's count query for an independent check.
 
 **PASS:** The notebook succeeds and all eight counts match. Go to Stage 4.
 
@@ -295,15 +295,16 @@ Ask: “How many cases are in case_summary, and what is the total permissive exp
 
 ### VALIDATE
 
-It must query `mulegraph.investigations.case_summary`, report 3 cases, and calculate a total. Then ask: “Under the strict evidence policy, count rows using evidence_strict_v. Do not use the raw evidence table.” Confirm its SQL uses `evidence_strict_v`.
+It must query `mulegraph.investigations.case_summary`, report 9 cases, and calculate a total. Then ask: “Under the strict evidence policy, count rows using evidence_strict_v. Do not use the raw evidence table.” Confirm its SQL uses `evidence_strict_v`.
 
 **PASS:** The space lists 12 sources and live Genie answers both questions using the expected objects. Go to Stage 5.
 
 #### Troubleshooting
 
 - Missing source: use **Configure data** to attach it and save.
-- Empty answer: confirm `case_summary` has 3 rows in SQL Editor.
+- Empty answer: confirm `case_summary` has 9 rows in SQL Editor.
 - Raw policy table used: confirm all views are attached, repeat the explicit view instruction, and save a successful question/SQL example before continuing.
+- **Genie questions fail or return no answer after you change the Gold table schema (e.g. add new columns, rerun the notebook with a different scenario count):** Genie Spaces snapshot table/column metadata when a source is attached and do **not** automatically detect schema changes on an already-attached table. Reopen the Space, go to **Configure data**, and re-select/re-save `accounts` and `case_summary` (and re-verify all 4 views) so Genie's schema grounding picks up the change. Then retry the same question directly inside the Genie Space UI (not through the app) to confirm it's fixed before testing the app again. The app's own “Ask Genie” panel now shows a collapsed **Technical details** section under any failed answer with the real exception message -- expand it first to see whether the failure is Genie-side (schema/warehouse) or something else.
 
 ## Stage 5 — Create and deploy the Databricks App
 

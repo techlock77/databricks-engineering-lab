@@ -46,6 +46,7 @@ assert "border" in inspect.signature(streamlit.container).parameters
 # container(key=...) arrived after the declared floor; app.py signature-gates it.
 assert "key" not in inspect.signature(streamlit.container).parameters
 assert "gap" in inspect.signature(streamlit.columns).parameters
+assert "unsafe_allow_html" in inspect.signature(streamlit.markdown).parameters
 assert "use_container_width" in inspect.signature(streamlit.graphviz_chart).parameters
 assert "x" in inspect.signature(streamlit.bar_chart).parameters
 assert "y" in inspect.signature(streamlit.bar_chart).parameters
