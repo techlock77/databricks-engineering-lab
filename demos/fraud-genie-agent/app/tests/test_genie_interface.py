@@ -121,6 +121,38 @@ def test_genie_query_preserves_operation_failure_when_refetch_fails(monkeypatch)
     assert str(exc_info.value) == "failed to reach COMPLETED, got MessageStatus.FAILED"
 
 
+def test_genie_query_preserves_operation_failure_when_message_has_no_error(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_GENIE_SPACE_ID", "space-1")
+    operation_failure = OperationFailed(
+        "failed to reach COMPLETED, got MessageStatus.FAILED"
+    )
+
+    class MessageWaiter:
+        conversation_id = "conversation-1"
+        message_id = "message-1"
+
+        def result(self):
+            raise operation_failure
+
+    genie = SimpleNamespace(
+        start_conversation=lambda **kwargs: MessageWaiter(),
+        get_message=lambda **kwargs: GenieMessage(
+            id="message-1",
+            space_id="space-1",
+            conversation_id="conversation-1",
+            content="",
+            message_id="message-1",
+            error=None,
+        ),
+    )
+
+    with pytest.raises(OperationFailed) as exc_info:
+        genie_query("Why?", _context(), client=SimpleNamespace(genie=genie))
+
+    assert exc_info.value is operation_failure
+    assert str(exc_info.value) == "failed to reach COMPLETED, got MessageStatus.FAILED"
+
+
 def test_genie_query_requires_space_id(monkeypatch):
     monkeypatch.delenv("DATABRICKS_GENIE_SPACE_ID", raising=False)
     with pytest.raises(RuntimeError, match="DATABRICKS_GENIE_SPACE_ID is required"):
