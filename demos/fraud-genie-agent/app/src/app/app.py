@@ -10,7 +10,33 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
+
+def _resolve_project_root() -> Path:
+    """Locate the app root for script and notebook-style execution."""
+    candidates = []
+    script_file = globals().get("__file__")
+    if script_file:
+        candidates.append(Path(script_file).resolve().parents[2])
+    candidates.append(Path.cwd().resolve())
+
+    attempted = []
+    for candidate in candidates:
+        if candidate in attempted:
+            continue
+        attempted.append(candidate)
+        if (candidate / "src" / "app" / "app.py").is_file():
+            return candidate
+
+    locations = ", ".join(str(path) for path in attempted)
+    raise RuntimeError(
+        "Unable to locate the MuleGraph app root. Expected to find "
+        f"src/app/app.py under one of: {locations}. When executing manually, "
+        "change the working directory to demos/fraud-genie-agent/app first; "
+        "for the deployed app, launch with `streamlit run src/app/app.py`."
+    )
+
+
+_ROOT = _resolve_project_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
