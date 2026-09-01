@@ -133,12 +133,18 @@ def render_kpi_strip(gold: dict, seed_account: str, metrics: dict) -> None:
     account = gold["accounts"][gold["accounts"]["account_id"] == seed_account].iloc[0]
     flagged = bool(account["is_flagged_mule_network"])
     columns = st.columns(6)
+    metric_parameters = inspect.signature(st.metric).parameters
+    risk_metric_kwargs = {
+        "delta": "🔴 Flagged for review" if flagged else "🟢 Not flagged",
+        # Named delta colors were added after the declared Streamlit floor.
+        "delta_color": "off",
+    }
+    if "delta_arrow" in metric_parameters:
+        risk_metric_kwargs["delta_arrow"] = "off"
     columns[0].metric(
         "Risk band",
         str(account["risk_band"]).upper(),
-        delta="Flagged for review" if flagged else "Not flagged",
-        delta_color="red" if flagged else "green",
-        delta_arrow="off",
+        **risk_metric_kwargs,
     )
     columns[1].metric("Linked exposure", f"${metrics['total_exposure']:,.2f}")
     columns[2].metric("Connected accounts", metrics["other_connected_accounts_count"])

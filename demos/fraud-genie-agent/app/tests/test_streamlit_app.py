@@ -138,7 +138,7 @@ def test_new_tab_structure_kpis_and_documented_genie_questions_render_once():
     ]
     risk_metric = app.metric[0]
     assert risk_metric.value == "HIGH"
-    assert risk_metric.delta == "Flagged for review"
+    assert risk_metric.delta == "🔴 Flagged for review"
     suggested_buttons = [
         app.button(key=f"genie_suggestion_{index}").label
         for index in range(len(_documented_questions()))

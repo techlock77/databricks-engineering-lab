@@ -1,3 +1,4 @@
 pandas>=2.0,<3.0
+# Keep this floor honest with: scripts/verify_floor_compatibility.sh
 streamlit>=1.32,<2.0
 databricks-sdk>=0.66,<1.0
