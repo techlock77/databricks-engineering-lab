@@ -1,177 +1,104 @@
-# Contest Demo Script — MuleGraph Investigator
+# MuleGraph Investigator — 2-Minute Contest Demo Script
 
-**Updated for the current architecture.** The app now reads persisted Delta tables
-from a real Databricks SQL warehouse and asks a real Databricks Genie Space —
-it is *not* the in-memory / rule-based-responder version described in earlier
-drafts of this script. Read the "Before you demo" box below before you present.
+**Fully revalidated against the current app** (branch `mulegraph-app-genie-fix`) — not an edit of an
+older script. This replaces all prior versions of this file, which described a version of the app that
+predates the 9-scenario expansion, the Home / Investigation Workspace split, the KPI strips, journey
+cards, the Genie-purple accent, the Genie error-detail surfacing fix, and the case-export scoping fix.
 
-> **Before you demo — do this or the numbers below won't match what you see:**
-> Run `scripts/generate_synthetic_data.py` with **`scale_factor = 1`, `seed = 42`**.
-> The app always shows whichever `case_summary` row loads first, and Unity Catalog
-> does not guarantee row order when more than one case exists — at the deployment
-> guide's *default* of `scale_factor = 3`, you could see a different account and
-> different numbers every time you reload the app. `scale_factor = 1` removes the
-> ambiguity: exactly one case exists, so the numbers below are guaranteed.
->
-> Because Genie now answers from a live, generative model (not the old fixed
-> keyword-matched responder), its exact wording will vary run to run. Everything
-> it says is still grounded in the same eight Gold tables and four policy views —
-> ask the questions below with confidence, but don't read Genie's answers as a
-> fixed script; paraphrase live and lean on the numbers, which *are* fixed.
+**Grounding:** every number, question, screen, and feature below was independently re-verified twice —
+once by re-reading the current source (`src/app/app.py`, `src/genie/interface.py`, `src/pipeline/gold.py`
+and friends) and running the real pipeline fresh, and again by an independent, different-vendor
+cross-review that re-ran the pipeline itself and re-checked every claim against the live code. Nothing
+here is invented or carried over from a stale draft.
 
-Total time: ~2:30–3:00.
+## Flagship case: `ACC_M_COLLECTOR` ("Simple suspicious transfer")
 
----
+Of the 9 seeded scenarios, this one — not the larger `ACC_LARGE_COLLECTOR` case — is used throughout,
+for three concrete, code-verified reasons:
 
-## 1. Problem (20s)
+1. The app's first suggested Genie question is hardcoded to name `ACC_M_COLLECTOR` by literal text.
+   Opening any other case would show that button asking about the wrong account on screen.
+2. `ACC_M_COLLECTOR` is the only case that visibly demonstrates the strict-vs-permissive evidence
+   policy difference — `ACC_LARGE_COLLECTOR`'s numbers are identical under both policies.
+3. Its 9-account network renders as a clean, readable graph at demo resolution; `ACC_LARGE_COLLECTOR`'s
+   28-node graph does not, in the time available.
 
-*(Layman)* Banks see thousands of "money mule" accounts every year — accounts
-that quietly collect stolen or scammed money from multiple victims and forward
-it onward before anyone notices. A single flagged transaction almost never
-tells the whole story.
+**Real, current numbers for this case (permissive policy, the default):** Linked exposure **$48,465.78**
+· Connected accounts **9** (8 under strict) · Shared devices **2** (1 under strict) · Potential victims
+**5** · External destinations **3** · Evidence rows **7** (6 under strict — the one dropped row is
+`ACC_M_LOOKALIKE`'s device-only link, which has no fund-flow corroboration) · Case export **8**
+citation-backed items under permissive.
 
-*(Technical)* MuleGraph Investigator is a Databricks App that lets an
-investigator start from **one flagged account** and use Genie to trace shared
-devices and fund flow outward — turning an isolated transaction alert into a
-full case file, live, in conversation.
-
-## 2. Suspicious Activity (20s)
-
-Open the app. Point at the case header:
-
-> Account **`ACC_M_COLLECTOR`** is flagged — **high risk band, flagged for
-> investigator review.**
-
-*(Layman)* This one account has been quietly receiving money from several
-different people and sending it out to several different places, over and
-over, for months. That pattern alone is why it got flagged.
-
-## 3. Ask Genie (30s)
-
-Open the **Ask Genie** panel and ask, live:
-
-> **"Why was this account flagged?"**
-
-Genie answers from the `accounts` Gold table and the `evidence_permissive_v`
-view — grounded in the real detection reason (fan-in from multiple sources,
-recurring fan-out to multiple destinations, crossing the flow threshold). The
-exact wording will vary; the facts it cites won't.
-
-*(Technical, if a Databricks engineer is in the room)* Genie is scoped to
-query the app's 8 persisted Gold Delta tables plus 4 policy-scoped views
-(`evidence_strict_v` / `evidence_permissive_v`, `network_edges_strict_v` /
-`network_edges_permissive_v`) — there is no separate "demo mode"; this is the
-same data the app's own UI reads.
-
-## 4. Follow the Money (40s)
-
-Ask Genie:
-
-> **"Where did the funds go?"** / **"Who is connected to this account?"**
-
-Then switch to the **Connected Accounts** and **Blast Radius** tabs to show
-the same facts, visually:
-
-| Metric (permissive policy) | Value |
-|---|---:|
-| Other connected accounts | **9** |
-| Shared devices | **2** |
-| Linked exposure | **$48,465.78** |
-| Potential victims | **5** |
-| External destinations | **3** |
-
-*(Layman)* One flagged account turns out to be the center of a nine-account
-network, tied together by two shared devices and over $48,000 in linked
-transfers.
-
-## 5. Reveal the Pattern — the cohort-redefinition moment (40s)
-
-This is the app's centerpiece. Toggle **Evidence policy** from *permissive* to
-*strict* live, on screen.
-
-*(Technical)* Strict mode keeps only fund-flow-corroborated evidence
-(`device_and_fund_flow` and `account_takeover_provenance`) and drops weak,
-device-only links. Watch the Blast Radius card, Evidence panel, and Connected
-Accounts tab all update together:
-
-| Metric | Permissive | Strict |
-|---|---:|---:|
-| Other connected accounts | 9 | **8** |
-| Shared devices | 2 | **1** |
-| Linked exposure | $48,465.78 | **$48,465.78** |
-
-*(Layman)* Tightening the evidence standard drops one weakly-linked account
-and one weak device connection — but notice the dollar exposure **doesn't
-move at all**. That's not a coincidence: every dollar in this case is already
-backed by real fund flow, not just a shared device. The investigator can now
-say exactly which parts of the case are rock-solid and which are worth a
-second look, on demand, without re-running anything.
-
-## 6. Technical Value (25s)
-
-*(Technical)* Every number on screen — permissive or strict — comes from the
-**same eight Gold tables**, computed once via a single shared policy module
-(`policy.py`), so the UI, the export, and Genie can never quietly disagree.
-The legitimate-remittance **control cohort** (Control Cohort tab) has the
-*exact same* fan-in/fan-out shape as the mule network but is protected by a
-recurring-corridor override (900+ days of tenure, an 8-month recurring
-corridor) — ask Genie **"Why are control-cohort accounts not flagged?"** to
-show this guardrail live, not just as a claim in a slide.
-
-## 7. Customer / Social Impact (20s)
-
-*(Layman)* This isn't about catching a computer's guess. It gives a human
-investigator the evidence to make the call — and just as importantly, it
-protects innocent customers whose accounts move money the same way legitimate
-businesses do. Nothing here takes automated action against an account; it
-only prioritizes it for a person's review.
-
-## Close — the strongest question (15s)
-
-Ask Genie, live, as the final beat:
-
-> **"What would we have missed if we investigated only the original
-> transaction?"**
-
-Let Genie answer from the real network data. Land the point yourself if
-needed: a single-transaction review would never have surfaced the shared
-devices, the other 8 connected accounts, or the $48,465.78 in linked exposure
-— that only comes from tracing the network, which is exactly what this app
-does in one conversation.
+Platform totals shown on Home: **9 scenario cases · 138 accounts · 129 network edges · 52 evidence rows
+· $584,433.67 combined exposure.**
 
 ---
 
-## Technical reveal (if judges ask "how does this actually work?")
+## Timed script (0:00 – 2:00)
 
-- **Data:** Bronze→Silver→Gold pipeline (`src/pipeline/`), materialized as 8
-  persisted Delta tables + 4 policy-scoped views in Unity Catalog — not
-  generated in-app.
-- **Genie:** a real Databricks Genie Space over those tables/views
-  (`src/genie/interface.py` calls `WorkspaceClient.genie.start_conversation_and_wait`).
-  No mock, no local responder in the deployed path.
-- **App:** Databricks App (Streamlit), reads via a SQL warehouse resource
-  (`src/data_access.py`), no data generated at runtime.
+Evidence policy stays **permissive** throughout except for a deliberate strict detour in Section 3,
+which is explicitly switched back to permissive before Section 4 — so every number shown on screen
+always matches the policy actually selected at that moment.
 
-## Concrete questions Genie can answer today (grounded, not hypothetical)
+### 1. Strong Opening — Real-World Problem *(0:00 – 0:15)*
 
-- Why was `ACC_M_COLLECTOR` flagged?
-- How many inbound sources / outbound destinations does it have?
-- Compare permissive vs. strict exposure, connected accounts, shared devices.
-- Which evidence disappears under the strict policy?
-- Which accounts are connected under the selected policy?
-- What transfers contribute to the linked exposure?
-- Why are control-cohort accounts not flagged?
-- How fresh is this data?
-- What would we have missed investigating only the original transaction?
+| Time | WHAT TO SHOW | WHAT TO SAY |
+|---|---|---|
+| 0:00–0:08 | Home screen: hero headline "Find the network before the money moves," stat line ("9 scenario cases · 138 accounts · 2026-06-01T00:00:00 refreshed"), Home KPI strip (Cases 9 · Accounts 138 · Connections 129 · Exposure/evidence $584,433.67 · 52 items). | "A fraud alert lands on an investigator's desk. It says one thing: this account looks suspicious. It doesn't say who it's connected to, where the money actually went, or whether this is one bad account — or a whole mule network hiding behind it." |
+| 0:08–0:15 | Pan on the featured case card (Priority · HIGH badge, scenario name, seed account) and the "Investigate with Genie →" button. | "That's the gap. This is MuleGraph Investigator — built on Databricks — and it closes it by turning one flagged account into a full, evidence-backed investigation in minutes." |
 
-## Safety notes
+### 2. Track A — Solve the Problem *(0:15 – 0:35)*
 
-- Prefer the app's own buttons/tabs to demonstrate mechanics precisely; use
-  the questions above (or close paraphrases) for the live Genie chat so
-  answers stay reliably grounded.
-- Genie is generative now — don't promise the audience exact wording from a
-  prior run. Promise the *facts* (they're fixed by the data); let the
-  phrasing be live.
-- If Genie is slow or the warehouse is cold-starting, the Blast Radius /
-  Connected Accounts / Evidence tabs still work instantly from the same
-  persisted tables — fall back to those if needed and keep talking.
+| Time | WHAT TO SHOW | WHAT TO SAY |
+|---|---|---|
+| 0:15–0:20 | Home → "Browse all scenarios" dropdown → select **"Simple suspicious transfer"** (the exact Home option text — no account-id suffix). App opens the Investigation Workspace, Overview section, on `ACC_M_COLLECTOR`. | "Step one: select the signal. We pick a real flagged case — Simple suspicious transfer, account `ACC_M_COLLECTOR` — out of nine seeded investigation scenarios sitting in Unity Catalog right now." |
+| 0:20–0:26 | Overview: case header ("Case: ACC_M_COLLECTOR," "Risk band: HIGH — Flagged for investigator review"), KPI strip (Linked exposure $48,465.78 · Connected accounts 9 · Potential victims 5 · Shared devices 2 · External destinations 3), journey-stage card 02 highlighted. | "Instantly: forty-eight thousand, four hundred sixty-five dollars in linked exposure, nine connected accounts, five potential victims — before we've asked a single question." |
+| 0:26–0:35 | Click "Investigate with Genie" action button → view jumps to Investigation section, Genie panel begins answering. | "Step two is where this stops being a dashboard: we investigate with Genie, follow the money, and uncover the rest of the network — live." |
+
+### 3. Genie at the Core *(0:35 – 1:25, ~50s — the hero section)*
+
+| Time | WHAT TO SHOW | WHAT TO SAY |
+|---|---|---|
+| 0:35–0:43 | "🔎 Genie is on this case" panel answering **"Why was this account flagged?"** (fired by the CTA), citations panel open. | "That question isn't a canned label. It's asked in plain English against real Genie, running conversational SQL over our governed investigation data in Unity Catalog. No manual query, no dashboard filter." |
+| 0:43–0:52 | Click the follow-up **"Which accounts are connected under the selected policy?"**. Genie's answer lands; briefly switch to Network to show the 9-spoke graph (5 device+fund-flow, 1 device-only to `ACC_M_LOOKALIKE`, 3 fund-flow). | "One grounded answer earns the next question. Genie's answer is grounded in the same governed data this network graph is built from — nine connected accounts, two shared devices — so what Genie says and what the app shows both trace back to the same Gold tables." |
+| 0:52–1:01 | Switch the evidence-policy radio from Permissive to Strict. Evidence table drops 7→6 rows (the device-only `ACC_M_LOOKALIKE` row disappears); KPI strip drops 9→8 connected, 2→1 shared devices. | "Ask it to tighten the standard of evidence, and it does — live. Under strict, the one device-only link with no fund-flow behind it drops out. Connected accounts go from nine to eight. That's policy-scoped reasoning over governed views — not static text." |
+| 1:01–1:12 | Toggle **"🔌 Disable Genie — Demonstrate Dependency"** ON. Submit any question — the panel returns: *"Genie conversational tracing is unavailable while the dependency is disabled. The KPI strip, Investigation, Money Flow, Network, and Reports remain live."* Toggle back OFF. | "Here's the proof this is load-bearing, not decoration. Disable Genie — the KPI strip, the evidence, the network graph, all still work, because they're reading straight from Delta tables. But the conversational investigation stops cold. Turn Genie back on, and it's back." |
+| 1:12–1:25 | Genie re-enabled. **Manually type** (not a suggested button) the required closing question: **"What would we have missed if we investigated only the original transaction?"** Show it submitted and Genie's grounded answer landing. | "Last question, typed by hand, because it's the one that matters most: what would we have missed if we'd investigated only the original transaction?" |
+
+### 4. App Experience *(1:25 – 1:45, ~20s)*
+
+| Time | WHAT TO SHOW | WHAT TO SAY |
+|---|---|---|
+| 1:25–1:29 | Switch the evidence-policy radio back to Permissive. Evidence returns to 7 rows; KPI strip returns to 9 connected / 2 devices. | "Back to our default, permissive view of the case for the rest of the walkthrough." |
+| 1:29–1:34 | Money Flow: transfers table (24 rows) + monthly bar chart. | "Follow the money directly: every one of the twenty-four transfers behind this case, rolled up by month." |
+| 1:34–1:39 | Network: 9-edge permissive graph, then the connected-accounts table underneath. | "The network view — accounts, devices, fund flow — draws from the exact same governed tables Genie just reasoned over." |
+| 1:39–1:45 | Reports: case file header (`CASE_ACC_M_COLLECTOR`), KPI recap, evidence list, "Download case file" button — caption reads exactly "Export ready: 8 citation-backed item(s) under the permissive policy." | "And every finding exports as a citation-backed case file — eight items under our permissive view, running on Databricks Apps over Unity Catalog." |
+
+### 5. Closing *(1:45 – 2:00)*
+
+| Time | WHAT TO SHOW | WHAT TO SAY |
+|---|---|---|
+| 1:45–1:52 | Home hero card, full screen, holding on the headline and the "Investigate with Genie →" button. | (brief pause) |
+| 1:52–2:00 | Static end card: MuleGraph Investigator logo mark / title. | **"An alert tells us something may be wrong. MuleGraph Investigator uses Databricks Genie to help investigators understand why, follow the money, uncover the hidden network, and understand who may be impacted."** |
+
+---
+
+## Before recording — checklist
+
+- **Rehearse against the real, deployed Genie Space once.** The exact sentences Genie speaks are not
+  scriptable — they come from a live model over live Delta tables. The numbers above (9→8 connected,
+  2→1 devices, $48,465.78 exposure) should inform its answers, but nothing guarantees Genie enumerates
+  every entity verbatim, matches the graph exactly, or names Gold tables by row id — the real citation
+  renderer labels sources generically as "Databricks Genie," not `gold_case_summary`/`gold_evidence`.
+  Describe citations on camera as "a citations panel grounding the answer," not by specific table names.
+- **Watch Genie's response latency** — the "Genie is investigating..." status has no fixed timeout in
+  the UI. If a real call runs long, hold on the loading state briefly or trim a beat elsewhere to stay
+  inside 2:00; the schedule above already has tight margins after the two Section 3/4 additions.
+- **Home's "Browse all scenarios" dropdown option is exactly `Simple suspicious transfer`** — no
+  account-id suffix. The longer `Simple suspicious transfer — ACC_M_COLLECTOR` label only appears in the
+  separate Investigation Workspace account selector, not on Home.
+- The "Disable Genie" toggle's real label uses two ASCII hyphens (`--`), not an em dash, if overlaying
+  on-screen text quoting it.
+- Do one live visual pass of Home → scenario dropdown → Overview → Investigation → policy toggle →
+  Disable Genie toggle → Network → Reports before recording, to confirm layout/CSS hasn't drifted since
+  this script was written.
