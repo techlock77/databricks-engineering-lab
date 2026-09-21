@@ -1,0 +1,124 @@
+Prompt: Convert PySpark Notebook to Spark SQL Using a Reference File
+
+Role
+
+Act as a Senior Databricks Data Engineer specializing in PySpark, Spark SQL, and code migration.
+
+Input Files
+
+1. "pytype.py" — Reference File: Contains the existing Spark SQL implementation. Use it to understand coding conventions, SQL execution patterns, naming conventions, and overall structure.
+2. "pyspark.ipynb" — Source File: Contains the PySpark transformations that need to be converted into Spark SQL.
+
+Objective
+
+Convert all applicable PySpark transformations in "pyspark.ipynb" into Spark SQL, following the implementation patterns established in "pytype.py".
+
+The converted code must produce the same results as the original notebook.
+
+Conversion Requirements
+
+1. Analyze Both Files First
+
+- Read the complete reference file and source notebook.
+- Identify the Spark SQL coding patterns used in "pytype.py".
+- Understand the transformation sequence, dependencies, source tables, and target tables.
+- Identify all PySpark DataFrame operations that can be expressed using Spark SQL.
+
+Do not start converting until the existing logic and dependencies are understood.
+
+2. Follow the Reference File
+
+Use "pytype.py" as the primary reference for:
+
+- Spark SQL execution using "spark.sql()".
+- Temporary views and SQL query structure.
+- Table and column naming conventions.
+- SQL formatting and code organization.
+- Error handling and logging, where applicable.
+
+Do not introduce a different implementation style unnecessarily.
+
+Important: The reference file defines the coding style, but the source notebook defines the business logic. Do not copy unrelated transformations from the reference file.
+
+3. Convert PySpark to Spark SQL
+
+Convert applicable operations, including:
+
+- "select()", "withColumn()", and "withColumnRenamed()" → SQL SELECT expressions and aliases.
+- "filter()" and "where()" → WHERE clauses.
+- "join()" → SQL JOIN operations.
+- "groupBy()" and aggregations → GROUP BY.
+- Window functions → SQL window expressions.
+- "when()" and "otherwise()" → CASE WHEN.
+- "union()" and "unionByName()" → appropriate SQL UNION operations with matching column alignment.
+
+Preserve the exact semantics of the original code, including NULL handling, data types, join conditions, duplicate behavior, and transformation order.
+
+4. Optimize the Conversion
+
+Avoid unnecessary DataFrames, temporary views, and intermediate tables.
+
+- Combine simple transformations into a single SQL query whenever possible.
+- Use column aliases directly instead of creating separate transformation steps.
+- Use CTEs for complex, reusable, or logically distinct transformations.
+- Avoid unnecessary SELECT * operations.
+- Do not repeatedly execute SQL queries when transformations can be combined.
+- Preserve materialization boundaries where required for correctness, performance, or downstream dependencies.
+
+Example:
+
+Original PySpark:
+
+df1 = df.select("*")
+df2 = df1.withColumnRenamed("Month", "Month_Number")
+df3 = df2.filter(F.col("Year") == 2026)
+
+Preferred Spark SQL:
+
+df3 = spark.sql("""
+    SELECT
+        * EXCEPT (Month),
+        Month AS Month_Number
+    FROM source_view
+    WHERE Year = 2026
+""")
+
+Use the appropriate source table or registered view. Do not assume that a Python DataFrame variable is automatically accessible in Spark SQL.
+
+5. Preserve Business Logic
+
+- Do not change filtering conditions or join types.
+- Preserve all required output columns and their order.
+- Maintain existing source and target table references unless the reference file explicitly establishes a required mapping.
+- Preserve data type conversions, date calculations, and NULL behavior.
+- Do not invent missing columns, tables, or business rules.
+- Identify any Python UDFs or operations that cannot be directly translated into Spark SQL.
+
+6. Validate the Conversion
+
+Compare the original PySpark implementation with the converted Spark SQL.
+
+Validate:
+
+- Output schema and column order.
+- Row counts.
+- Data types and NULL values.
+- Aggregation results.
+- Join cardinality and duplicate handling.
+- Business-rule equivalence.
+
+Where execution is unavailable, generate validation queries and clearly identify what remains untested.
+
+Expected Output
+
+Produce a new Python file named "converted_spark_sql.py" that:
+
+1. Follows the structure and conventions of "pytype.py".
+2. Contains the converted Spark SQL transformations.
+3. Preserves the functionality of "pyspark.ipynb".
+4. Eliminates redundant intermediate transformations.
+5. Is ready to run in the intended Databricks environment, subject to any explicitly identified dependencies.
+
+Also provide a concise conversion summary covering any transformations that could not be converted, assumptions made, and validation results.
+
+Final instruction: Prioritize functional equivalence, clean Spark SQL, minimal intermediate DataFrames, and consistency with the reference file. Do not rewrite unrelated code or introduce unnecessary abstractions.
