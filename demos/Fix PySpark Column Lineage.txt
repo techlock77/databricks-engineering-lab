@@ -1,0 +1,17 @@
+Task: Fix PySpark Column Lineage and Remove Redundant DataFrames
+
+Review the original Alteryx YXMD, all three DDR files, and the existing converted PySpark code.
+
+1. Trace complete column lineage: Starting from every source, trace all columns through every connected Alteryx tool ID to the final target. Identify fields added, renamed, removed, modified, and propagated. Validate each tool's output schema against its downstream input.
+
+2. Correct column names: Fix incorrect names at their origin and propagate corrections downstream. The final PySpark DataFrame must match the target table's column names, data types, and column order exactly, with no missing, extra, or duplicate columns.
+
+3. Optimize DataFrame creation: Identify and eliminate redundant or repeatedly created DataFrames. Combine simple transformations such as renaming, selecting, and casting wherever possible without changing business logic or necessary intermediate results.
+
+4. Validate against Alteryx: Use the YXMD as the source of truth for transformation logic, cross-reference all three DDR files for column metadata, and consult official Alteryx documentation whenever tool behavior is unclear.
+
+5. Verify before completion: Perform source-to-target lineage validation and compare the final DataFrame schema with the target table. Report any unresolved discrepancies rather than assuming correctness.
+
+Important: Modify the existing PySpark code, preserve validated business logic, and avoid unnecessary rewrites. Do not stop at correcting the final SELECT—resolve column mismatches at their originating tool IDs.
+
+Deliver: Corrected PySpark code, a concise summary of changes, and final schema validation results.
