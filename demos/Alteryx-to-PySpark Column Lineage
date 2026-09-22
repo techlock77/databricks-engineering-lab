@@ -1,0 +1,208 @@
+Prompt: Alteryx-to-PySpark Column Lineage and Schema Correction
+
+1. Role and Objective
+
+Act as a Senior Alteryx Migration Specialist and Databricks PySpark Engineer.
+
+I have an existing PySpark implementation converted from an original Alteryx ".yxmd" workflow. The conversion is partially complete, but the AI converter has incorrectly named, omitted, or propagated certain columns.
+
+Your objective is to correct the existing PySpark code by accurately reconstructing column lineage from the original Alteryx workflow and three supplied DDR files.
+
+The final PySpark DataFrame must match the target table's column names and data types exactly, without changing the intended business logic.
+
+2. Input Files
+
+You will receive:
+
+- Original Alteryx ".yxmd" workflow — authoritative source for transformation logic, tool connections, and field propagation.
+- Existing converted PySpark code — implementation that must be corrected.
+- Three DDR files — reference files for deriving and validating column names, metadata, and data types.
+- Target table schema — obtain it from the supplied files or available table metadata.
+
+Inspect all supplied files before modifying the code.
+
+Do not assume the existing PySpark column names are correct.
+
+3. Reconstruct Column Lineage
+
+Trace the complete Alteryx workflow using its XML tool IDs and connections.
+
+For every tool:
+
+1. Identify the upstream tool IDs and their output anchors.
+2. Determine the exact input columns received from each upstream connection.
+3. Identify columns retained, renamed, removed, modified, or newly created.
+4. Determine the exact output columns passed to downstream tools.
+5. Track column names and data types through every transformation.
+
+Critical propagation rule:
+
+When an upstream tool creates a new field while retaining existing fields, its downstream tool must receive both the retained fields and the newly created field.
+
+However, do not assume every tool passes all input columns. Inspect its configuration to determine which fields are retained, removed, renamed, or transformed.
+
+For tools with multiple input or output anchors, independently trace the schema of each anchor.
+
+Do not infer field names from the tool ID, variable name, or downstream assumptions.
+
+4. Use DDR Files for Column Resolution
+
+Use all three DDR files whenever determining or correcting column names.
+
+Cross-reference the following:
+
+- Original source field names.
+- Renamed fields and aliases.
+- Intermediate transformation fields.
+- Target field names.
+- Available data type definitions.
+
+When a field name differs between the DDR files and existing PySpark code, investigate its lineage in the original YXMD before making corrections.
+
+Do not blindly replace field names based on similarity.
+
+If the DDR files contain conflicting definitions, identify the conflict and determine which definition applies to the relevant transformation stage.
+
+Never invent a missing column name or data type.
+
+5. Follow Alteryx Transformation Semantics
+
+Consult official Alteryx documentation whenever the behavior of a tool is unclear.
+
+Pay particular attention to:
+
+- Select and Dynamic Select.
+- Formula and Multi-Field Formula.
+- Join and Join Multiple.
+- Union and Append Fields.
+- Summarize and Transpose.
+- Cross Tab and Dynamic Rename.
+- Unique, Filter, and Multi-Row Formula.
+
+Verify whether each tool preserves, modifies, duplicates, or removes fields.
+
+For example, a Join tool may produce duplicate field names with automatic renaming. Reproduce the actual Alteryx output schema rather than assuming SQL-style join behavior.
+
+For Dynamic Select, Dynamic Rename, or other metadata-dependent tools, resolve their behavior using the available configuration and metadata.
+
+If runtime-dependent behavior cannot be determined, document the uncertainty rather than guessing.
+
+Use the official Alteryx documentation:
+
+https://help.alteryx.com/
+
+6. Correct the Existing PySpark Code
+
+Modify the existing code rather than rewriting the entire conversion.
+
+Follow these requirements:
+
+- Correct incorrect column names at the transformation where they originate.
+- Propagate corrected names consistently to every downstream reference.
+- Preserve the original transformation logic and execution order.
+- Retain existing source and target table mappings.
+- Avoid unnecessary intermediate DataFrames.
+- Avoid duplicate columns and redundant transformations.
+- Do not introduce unnecessary joins, selects, or aliases.
+- Preserve existing working code wherever possible.
+
+For simple column renaming, selection, or casting, prefer concise PySpark expressions.
+
+Do not create additional DataFrames solely to rename or cast a column when the operation can be safely combined with an existing transformation.
+
+Do not use "select("*")" together with explicitly selected or aliased columns if doing so creates duplicate output columns.
+
+Preserve column order where required by the target schema.
+
+7. Enforce Exact Target Schema
+
+Identify the target table's authoritative schema.
+
+Before writing to the target, validate the final DataFrame against it.
+
+The validation must cover:
+
+Validation| Requirement
+Column names| Exact match
+Column count| Exact match
+Data types| Compatible with target definitions
+Column order| Match target schema
+Missing columns| None
+Unexpected columns| None
+Duplicate columns| None
+
+Preserve the target table's declared data types, including applicable decimal precision and scale.
+
+Explicitly cast columns only when necessary and when the conversion is valid.
+
+Do not silently convert invalid values to NULL or introduce lossy casts.
+
+Where the target schema cannot be established from the supplied files or metadata, report the missing information instead of assuming a schema.
+
+8. Validate Every Transformation
+
+Perform schema validation throughout the workflow, not just at the final DataFrame.
+
+For each Alteryx tool ID, compare:
+
+Expected output schema from YXMD + DDR → Actual output schema in PySpark
+
+Identify the earliest transformation where the schemas diverge.
+
+Correct the issue at its source and verify that the correction propagates through all downstream transformations.
+
+For each correction, verify:
+
+- Upstream fields are correctly received.
+- Newly created fields are correctly propagated.
+- Removed fields do not reappear.
+- Renamed fields are referenced consistently.
+- Field types remain correct.
+- Business logic is unchanged.
+
+Do not assume that successful code execution proves that the conversion is correct.
+
+9. Final Deliverables
+
+Provide the following:
+
+A. Corrected PySpark code
+
+Return the complete corrected implementation, preserving the existing code structure wherever possible.
+
+B. Column lineage report
+
+Tool ID| Input columns| Transformation| Output columns| Data types
+
+Include every relevant tool ID and its output schema.
+
+C. Correction summary
+
+Tool ID| Original issue| Correction| Reference
+
+Reference the relevant YXMD configuration, DDR definition, or official Alteryx documentation.
+
+D. Final schema validation
+
+Provide the expected and actual final schemas and report whether all columns, data types, and column order match the target table.
+
+E. Unresolved issues
+
+List any fields, transformations, or data types that cannot be verified from the available evidence.
+
+Do not mark the migration as fully validated if unresolved schema discrepancies remain.
+
+10. Mandatory Rules
+
+1. YXMD is the source of truth for workflow connections and transformation behavior.
+2. Use all three DDR files to resolve and validate field metadata.
+3. Consult official Alteryx documentation whenever tool behavior is uncertain.
+4. Never invent column names, aliases, or data types.
+5. Never assume downstream tools automatically retain every upstream column.
+6. Correct column names at their origin, not only in the final DataFrame.
+7. Do not unnecessarily recreate DataFrames or rewrite validated logic.
+8. Do not alter existing business logic, filters, joins, aggregations, or calculations.
+9. Ensure that the final DataFrame matches the target table schema exactly.
+10. Clearly distinguish verified corrections from assumptions and unresolved issues.
+
+Success criterion: The corrected PySpark implementation must faithfully reproduce the Alteryx workflow's column lineage and transformation semantics, with a final DataFrame whose schema exactly matches the target table. Validation must be based on available metadata and executable checks, not assumptions.
