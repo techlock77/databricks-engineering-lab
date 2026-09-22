@@ -1,0 +1,13 @@
+**Task: Validate End-to-End Alteryx-to-PySpark Lineage**
+
+The final DataFrame's column names and data types are already corrected. Now validate the **entire PySpark implementation against the original YXMD workflow, from source to target.**
+
+1. Trace every Alteryx tool ID, connection, and input/output anchor in execution order.
+2. Verify that every intermediate DataFrame correctly replicates its corresponding Alteryx transformation, including column names, data types, field additions, removals, renames, and propagation.
+3. Identify the earliest tool ID where PySpark deviates from the YXMD and correct the issue at its origin, including all affected downstream references.
+4. Cross-reference all three DDR files for column metadata and consult official Alteryx documentation whenever tool behavior is unclear.
+5. Eliminate redundant DataFrame creation without changing transformation logic or breaking lineage.
+
+**Critical:** Do not assume the implementation is correct simply because the final DataFrame matches the target schema. Validate every preceding transformation and ensure the complete XML workflow is faithfully replicated in PySpark.
+
+**Deliver:** Corrected PySpark code and a concise tool-ID-level validation report identifying mismatches, corrections, and unresolved issues. Preserve all previously validated logic.
